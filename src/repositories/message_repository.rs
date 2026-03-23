@@ -29,14 +29,16 @@ impl MessageRepository {
         send_type: i16,
         scheduled_at: Option<chrono::DateTime<chrono::Utc>>,
         sender_id: Option<i64>,
+        source_type: String,
+        source_detail: Option<String>,
     ) -> AppResult<i64> {
         let result = sqlx::query(
             r#"
             INSERT INTO t_sys_messages (
                 tenant_id, message_code, template_id, category, priority,
                 title, content, jump_type, jump_params, extra_data,
-                send_type, scheduled_at, sender_id, status
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 0)
+                send_type, scheduled_at, sender_id, source_type, source_detail, status
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 0)
             RETURNING id
             "#
         )
@@ -53,6 +55,8 @@ impl MessageRepository {
         .bind(send_type)
         .bind(scheduled_at)
         .bind(sender_id)
+        .bind(&source_type)
+        .bind(&source_detail)
         .fetch_one(&self.db)
         .await?;
 

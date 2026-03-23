@@ -1,4 +1,5 @@
 mod cache;
+mod channel;
 mod config;
 mod error;
 mod handlers;
@@ -38,6 +39,7 @@ pub struct AppState {
     pub ws_manager: Arc<RwLock<WebSocketManager>>,
     pub config: Arc<Config>,
     pub repos: Repos,
+    pub channel_manager: Arc<channel::ChannelManager>,
 }
 
 #[derive(Clone)]
@@ -88,6 +90,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         template: repositories::template_repository::TemplateRepository::new(db.clone()),
     };
 
+    // Create channel manager and register channels
+    let mut channel_manager = channel::ChannelManager::new();
+    channel_manager.register_channel(Box::new(channel::LogFileChannel::default_with_dir()));
+    let channel_manager = Arc::new(channel_manager);
+    tracing::info!("Registered message channels: log_file");
+
     // Create application state
     let app_state = AppState {
         db: db.clone(),
@@ -95,6 +103,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ws_manager: ws_manager.clone(),
         config: Arc::new(config.clone()),
         repos,
+        channel_manager: channel_manager.clone(),
     };
 
     // Wrap state in Arc for sharing across handlers

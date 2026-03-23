@@ -216,6 +216,163 @@ Client          API             MQ            Consumer        PushService      W
 
 ---
 
+## 消息源与消息目标数据流架构
+
+### 架构概览
+
+本消息系统支持多种**消息源**向多种**目标类型**分发消息，通过统一的渠道抽象实现灵活的推送策略。
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                              消息源 (Message Source)                                 │
+├─────────────────┬─────────────────┬─────────────────┬───────────────────────────────┤
+│   系统消息源     │   组织消息源     │   审批任务源    │      外部集成源                │
+│   (System)      │   (Org)         │   (Workflow)    │      (External)               │
+├─────────────────┼─────────────────┼─────────────────┼───────────────────────────────┤
+│ • 系统公告      │ • 部门通知      │ • 待办任务      │ • 第三方系统 webhook          │
+│ • 安全提醒      │ • 组织变更      │ • 审批结果      │ • 定时任务触发                │
+│ • 维护通知      │ • 活动通知      │ • 抄送消息      │ • 数据同步事件                │
+└────────┬────────┴────────┬────────┴────────┬────────┴────────┬──────────────────────┘
+         │                 │                 │                 │
+         └─────────────────┴────────┬────────┴─────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                          消息分发服务 (Message Dispatcher)                           │
+│  ┌───────────────────────────────────────────────────────────────────────────────┐  │
+│  │  dispatch(message, source_type, target_rules)                                  │  │
+│  │    ├── 根据 source_type 设置消息类别                                            │  │
+│  │    ├── 根据 target_rules 解析目标用户列表                                       │  │
+│  │    └── 调用各渠道推送器并行发送                                                 │  │
+│  └───────────────────────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────┬───────────────────────────────────────────────────┘
+                                  │
+          ┌───────────────────────┼───────────────────────┐
+          │                       │                       │
+          ▼                       ▼                       ▼
+┌─────────────────┐   ┌─────────────────┐   ┌─────────────────────────────────────────┐
+│   目标类型解析    │   │   渠道选择策略   │   │           推送渠道实现                   │
+├─────────────────┤   ├─────────────────┤   ├─────────────┬─────────────┬─────────────┤
+│ • 目标组织       │   │ • WebSocket     │   │  WebSocket  │   Email     │  DingTalk   │
+│   (org_ids)     │   │ • Email         │   │   (实时)    │   (邮件)    │   (钉钉)    │
+│ • 目标角色       │   │ • DingTalk      │   ├─────────────┼─────────────┼─────────────┤
+│   (role_codes)  │   │ • LogFile       │   │   SMS       │   LogFile   │   (其他)    │
+│ • 目标用户       │   │ • SMS           │   │   (短信)    │  (日志STUB) │             │
+│   (user_ids)    │   │                 │   │             │             │             │
+│ • 自定义条件     │   │                 │   │             │             │             │
+└─────────────────┘   └─────────────────┘   └─────────────┴─────────────┴─────────────┘
+```
+
+### 消息源类型定义
+
+| 消息源 | source_type | 说明 | 典型场景 |
+|--------|-------------|------|----------|
+| **系统** | `system` | 平台级消息，面向所有用户或特定范围 | 系统公告、安全提醒、版本更新 |
+| **组织** | `organization` | 部门/组织级消息，面向组织内成员 | 部门通知、组织活动、人员变更 |
+| **审批任务** | `workflow` | 流程审批相关消息，面向任务相关人 | 待办提醒、审批结果、抄送通知 |
+| **外部集成** | `external` | 第三方系统触发的消息 | API调用、Webhook事件、数据同步 |
+
+### 目标类型定义
+
+| 目标类型 | target_type | 解析方式 | 数据来源 |
+|----------|-------------|----------|----------|
+| **指定用户** | `user` | 直接使用 user_ids | 请求传入（外部服务已解析） |
+| **组织架构** | `org` | 外部服务解析 org_ids → user_ids | 外部组织服务 |
+| **角色** | `role` | 外部服务解析 role_codes → user_ids | 外部权限服务 |
+| **自定义** | `custom` | 外部服务根据条件解析 | 外部查询服务 |
+
+### 消息类型映射
+
+```
+消息源 + 业务场景 → 消息类型 (msg_type)
+
+系统 (system)
+  ├── 公告通知 → system_announcement
+  ├── 安全提醒 → system_security
+  └── 维护通知 → system_maintenance
+
+组织 (organization)
+  ├── 部门通知 → org_department
+  ├── 组织变更 → org_change
+  └── 活动通知 → org_activity
+
+审批任务 (workflow)
+  ├── 待办任务 → workflow_todo
+  ├── 审批结果 → workflow_result
+  └── 抄送通知 → workflow_cc
+```
+
+### 数据流详细设计
+
+#### 1. 消息分发日志结构
+
+每条消息分发记录包含以下信息：
+
+```rust
+struct MessageDispatchLog {
+    // 时间信息
+    timestamp: DateTime<Utc>,          // 分发时间
+    message_id: String,                 // 消息唯一标识
+
+    // 消息源信息
+    source_type: MessageSource,         // 消息源类型
+    source_detail: String,              // 具体来源（系统模块/组织ID/审批流程ID）
+
+    // 目标信息
+    target_orgs: Vec<i64>,              // 目标组织ID列表
+    target_roles: Vec<String>,          // 目标角色编码列表
+    target_users: Vec<i64>,             // 目标用户ID列表
+
+    // 消息分类
+    msg_type: MessageType,              // 消息类型（系统/组织/任务）
+    category: String,                   // 业务分类
+
+    // 分发结果
+    channels: Vec<String>,              // 使用的渠道
+    status: DispatchStatus,             // 分发状态
+}
+```
+
+#### 2. 日志文件格式
+
+```
+# 日志文件: logs/message-dispatch.2024-01-01.log
+
+[2024-01-01T09:15:30.123Z] MSG_abc123 | SOURCE:system | FROM:system_monitor | TYPE:system_security | ORGS:[] | ROLES:[] | USERS:[1001,1002,1003] | CHANNELS:[websocket,log] | STATUS:success
+[2024-01-01T09:20:45.456Z] MSG_def456 | SOURCE:organization | FROM:org_10 | TYPE:org_department | ORGS:[10,11] | ROLES:[] | USERS:[2001,2002,2003,2004] | CHANNELS:[websocket,log] | STATUS:success
+[2024-01-01T09:25:12.789Z] MSG_ghi789 | SOURCE:workflow | FROM:wf_approval_123 | TYPE:workflow_todo | ORGS:[] | ROLES:[manager] | USERS:[3001] | CHANNELS:[websocket,log] | STATUS:success
+```
+
+#### 3. 渠道抽象接口
+
+```rust
+#[async_trait]
+pub trait MessageChannel: Send + Sync {
+    /// 渠道名称
+    fn name(&self) -> &str;
+
+    /// 是否支持该消息类型
+    fn supports(&self, msg_type: &MessageType) -> bool;
+
+    /// 发送消息
+    async fn send(
+        &self,
+        message: &Message,
+        target: &DispatchTarget,
+    ) -> Result<ChannelResult, ChannelError>;
+}
+
+/// 分发目标
+pub struct DispatchTarget {
+    pub user_id: i64,
+    pub org_id: Option<i64>,
+    pub role_codes: Vec<String>,
+    pub channels: Vec<String>,
+}
+```
+
+---
+
 ## 数据库设计 (PostgreSQL)
 
 ### 1. 租户表 (tenants)
@@ -309,6 +466,9 @@ CREATE TABLE messages (
     expire_at TIMESTAMPTZ,
     sender_id BIGINT,  -- 来自 JWT，不维护外键
     sender_type VARCHAR(20) DEFAULT 'user',
+    -- 消息源信息
+    source_type VARCHAR(20) DEFAULT 'system',  -- 消息源类型: system/organization/workflow/external
+    source_detail VARCHAR(100),                 -- 消息源详情（系统模块/组织ID/流程ID）
     status SMALLINT DEFAULT 0,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
@@ -324,6 +484,8 @@ CREATE INDEX idx_messages_created ON messages(created_at DESC);
 COMMENT ON TABLE messages IS '消息表';
 COMMENT ON COLUMN messages.send_type IS '发送类型 1:立即 2:定时';
 COMMENT ON COLUMN messages.sender_type IS 'user/system';
+COMMENT ON COLUMN messages.source_type IS '消息源类型: system/organization/workflow/external';
+COMMENT ON COLUMN messages.source_detail IS '消息源详情: 系统模块名/组织ID/审批流程ID';
 COMMENT ON COLUMN messages.status IS '0:待发送 1:已发送 2:已取消 3:失败';
 ```
 

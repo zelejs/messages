@@ -17,6 +17,9 @@ pub enum AppError {
     #[error("Serialization error: {0}")]
     Serialization(#[from] serde_json::Error),
 
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+
     #[error("Unauthorized")]
     Unauthorized,
 
@@ -59,6 +62,10 @@ impl IntoResponse for AppError {
             AppError::RabbitMQ(e) => {
                 tracing::error!("RabbitMQ error: {:?}", e);
                 (StatusCode::INTERNAL_SERVER_ERROR, "Message queue error".to_string())
+            }
+            AppError::Io(e) => {
+                tracing::error!("IO error: {:?}", e);
+                (StatusCode::INTERNAL_SERVER_ERROR, "IO error".to_string())
             }
             _ => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
         };
