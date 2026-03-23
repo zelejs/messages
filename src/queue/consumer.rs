@@ -16,7 +16,7 @@ pub async fn start_consumer(
     config: Config,
     db: sqlx::PgPool,
     redis: redis::aio::ConnectionManager,
-    _ws_manager: Arc<RwLock<WebSocketManager>>,
+    ws_manager: Arc<RwLock<WebSocketManager>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Connect to RabbitMQ
     let conn = Connection::connect(&config.rabbitmq_url, ConnectionProperties::default()).await?;
@@ -35,7 +35,7 @@ pub async fn start_consumer(
     tracing::info!("Message queue consumer started: {}", queue.name());
 
     // Create service instance
-    let message_service = MessageService::new(db, redis);
+    let message_service = MessageService::new(db.clone(), redis.clone(), ws_manager.clone());
 
     process_messages(channel, message_service).await?;
 

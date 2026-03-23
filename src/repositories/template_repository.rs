@@ -19,7 +19,7 @@ impl TemplateRepository {
 
         let result = sqlx::query(
             r#"
-            INSERT INTO message_templates (
+            INSERT INTO t_sys_message_templates (
                 template_code, template_name, category, priority,
                 title_template, content_template, jump_type, jump_params, channels
             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
@@ -42,7 +42,7 @@ impl TemplateRepository {
     }
 
     pub async fn get_by_id(&self, id: i64) -> AppResult<Option<MessageTemplate>> {
-        let template = sqlx::query_as("SELECT * FROM message_templates WHERE id = $1")
+        let template = sqlx::query_as("SELECT * FROM t_sys_message_templates WHERE id = $1")
             .bind(id)
             .fetch_optional(&self.db)
             .await?;
@@ -51,7 +51,7 @@ impl TemplateRepository {
     }
 
     pub async fn get_by_code(&self, code: &str) -> AppResult<Option<MessageTemplate>> {
-        let template = sqlx::query_as("SELECT * FROM message_templates WHERE template_code = $1")
+        let template = sqlx::query_as("SELECT * FROM t_sys_message_templates WHERE template_code = $1")
             .bind(code)
             .fetch_optional(&self.db)
             .await?;
@@ -69,7 +69,7 @@ impl TemplateRepository {
 
         let templates = sqlx::query_as(
             r#"
-            SELECT * FROM message_templates
+            SELECT * FROM t_sys_message_templates
             WHERE ($1::VARCHAR IS NULL OR category = $1)
             ORDER BY created_at DESC
             LIMIT $2 OFFSET $3
@@ -86,7 +86,7 @@ impl TemplateRepository {
 
     pub async fn count(&self, category: Option<&str>) -> AppResult<i64> {
         let result = sqlx::query(
-            "SELECT COUNT(*) as count FROM message_templates WHERE ($1::VARCHAR IS NULL OR category = $1)"
+            "SELECT COUNT(*) as count FROM t_sys_message_templates WHERE ($1::VARCHAR IS NULL OR category = $1)"
         )
         .bind(category)
         .fetch_one(&self.db)
@@ -100,7 +100,7 @@ impl TemplateRepository {
 
         sqlx::query(
             r#"
-            UPDATE message_templates
+            UPDATE t_sys_message_templates
             SET
                 template_name = COALESCE($1, template_name),
                 category = COALESCE($2, category),
@@ -130,7 +130,7 @@ impl TemplateRepository {
     }
 
     pub async fn delete(&self, id: i64) -> AppResult<()> {
-        sqlx::query("DELETE FROM message_templates WHERE id = $1")
+        sqlx::query("DELETE FROM t_sys_message_templates WHERE id = $1")
             .bind(id)
             .execute(&self.db)
             .await?;

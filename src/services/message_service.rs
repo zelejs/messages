@@ -2,26 +2,36 @@ use crate::{
     error::{AppError, AppResult},
     models::message::{CreateMessageRequest, Message},
     repositories::message_repository::MessageRepository,
-    services::{target_resolver::TargetResolver, template_service::TemplateService},
+    services::{push_service::PushService, target_resolver::TargetResolver, template_service::TemplateService},
+    websocket::WebSocketManager,
 };
 use sqlx::PgPool;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 use uuid::Uuid;
 
 pub struct MessageService {
+    db: PgPool,
+    redis: redis::aio::ConnectionManager,
     repo: MessageRepository,
     template_service: TemplateService,
     target_resolver: TargetResolver,
+    ws_manager: Arc<RwLock<WebSocketManager>>,
 }
 
 impl MessageService {
     pub fn new(
         db: PgPool,
         redis: redis::aio::ConnectionManager,
+        ws_manager: Arc<RwLock<WebSocketManager>>,
     ) -> Self {
         Self {
+            db: db.clone(),
+            redis: redis.clone(),
             repo: MessageRepository::new(db.clone()),
             template_service: TemplateService::new(db.clone()),
             target_resolver: TargetResolver::new(db, redis),
+            ws_manager,
         }
     }
 
@@ -105,10 +115,18 @@ impl MessageService {
 
         tracing::info!("Message {} target users: {}", message_id, user_ids.len());
 
-        // 4. Create user messages
+        // 4. Create user t_sys_messages
         self.repo.create_user_messages(message_id, &user_ids).await?;
 
-        // 5. Update message status
+        // 5. Push via channels
+        let push_service = PushService::with_default_channels(
+            self.db.clone(),
+            self.redis.clone(),
+            self.ws_manager.clone(),
+        );
+        push_service.push_to_users(&message, user_ids.clone()).await?;
+
+        // 6. Update message status
         self.repo
             .update_status(message_id, 1, Some(chrono::Utc::now()))
             .await?;

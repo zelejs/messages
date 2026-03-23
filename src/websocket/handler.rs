@@ -25,7 +25,7 @@ async fn handle_socket(socket: WebSocket, tenant_id: i64, state: Arc<AppState>) 
     // TODO: Extract user_id and token from connection parameters/headers
     let user_id = 1; // Placeholder - should be extracted from JWT token
 
-    // Create a channel for sending messages to this connection
+    // Create a channel for sending t_sys_messages to this connection
     let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
 
     // Register the channel with the manager
@@ -34,7 +34,7 @@ async fn handle_socket(socket: WebSocket, tenant_id: i64, state: Arc<AppState>) 
         manager.add_connection(tenant_id, user_id, tx).await;
     }
 
-    // Spawn a task to handle sending messages from the channel
+    // Spawn a task to handle sending t_sys_messages from the channel
     tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
             if sender.send(msg).await.is_err() {
@@ -58,7 +58,7 @@ async fn handle_socket(socket: WebSocket, tenant_id: i64, state: Arc<AppState>) 
         let _ = manager.send_to_user(tenant_id, user_id, welcome).await;
     }
 
-    // Handle incoming messages
+    // Handle incoming t_sys_messages
     let manager_for_handler = state.ws_manager.clone();
     let state_for_handler = state.clone();
     while let Some(msg) = receiver.next().await {

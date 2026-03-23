@@ -32,7 +32,7 @@ impl MessageRepository {
     ) -> AppResult<i64> {
         let result = sqlx::query(
             r#"
-            INSERT INTO messages (
+            INSERT INTO t_sys_messages (
                 tenant_id, message_code, template_id, category, priority,
                 title, content, jump_type, jump_params, extra_data,
                 send_type, scheduled_at, sender_id, status
@@ -68,7 +68,7 @@ impl MessageRepository {
     ) -> AppResult<i64> {
         let result = sqlx::query(
             r#"
-            INSERT INTO message_target_rules (
+            INSERT INTO t_sys_message_target_rules (
                 message_id, target_type, target_scope, filter_conditions
             ) VALUES ($1, $2, $3, $4)
             RETURNING id
@@ -85,7 +85,7 @@ impl MessageRepository {
     }
 
     pub async fn get_by_id(&self, id: i64) -> AppResult<Option<Message>> {
-        let message = sqlx::query_as("SELECT * FROM messages WHERE id = $1")
+        let message = sqlx::query_as("SELECT * FROM t_sys_messages WHERE id = $1")
             .bind(id)
             .fetch_optional(&self.db)
             .await?;
@@ -94,7 +94,7 @@ impl MessageRepository {
     }
 
     pub async fn get_by_code(&self, code: &str) -> AppResult<Option<Message>> {
-        let message = sqlx::query_as("SELECT * FROM messages WHERE message_code = $1")
+        let message = sqlx::query_as("SELECT * FROM t_sys_messages WHERE message_code = $1")
             .bind(code)
             .fetch_optional(&self.db)
             .await?;
@@ -104,7 +104,7 @@ impl MessageRepository {
 
     pub async fn get_target_rules(&self, message_id: i64) -> AppResult<Vec<TargetRule>> {
         let rules = sqlx::query_as(
-            "SELECT target_type, target_scope, filter_conditions FROM message_target_rules WHERE message_id = $1"
+            "SELECT target_type, target_scope, filter_conditions FROM t_sys_message_target_rules WHERE message_id = $1"
         )
         .bind(message_id)
         .fetch_all(&self.db)
@@ -121,8 +121,8 @@ impl MessageRepository {
         for user_id in user_ids {
             sqlx::query(
                 r#"
-                INSERT INTO user_messages (message_id, user_id, tenant_id)
-                SELECT $1, $2, tenant_id FROM messages WHERE id = $1
+                INSERT INTO t_sys_user_messages (message_id, user_id, tenant_id)
+                SELECT $1, $2, tenant_id FROM t_sys_messages WHERE id = $1
                 ON CONFLICT (message_id, user_id) DO NOTHING
                 "#
             )
@@ -171,8 +171,8 @@ impl MessageRepository {
                 um.is_read,
                 um.read_at,
                 um.is_pinned
-            FROM user_messages um
-            JOIN messages m ON um.message_id = m.id
+            FROM t_sys_user_messages um
+            JOIN t_sys_messages m ON um.message_id = m.id
             WHERE um.user_id = $1
               AND um.is_deleted = 0
               AND ($2::VARCHAR IS NULL OR m.category = $2)
@@ -190,7 +190,7 @@ impl MessageRepository {
         .await
         .map_err(AppError::Database)?;
 
-        let messages: Vec<UserMessageDetail> = rows.into_iter().map(|row: sqlx::postgres::PgRow| {
+        let t_sys_messages: Vec<UserMessageDetail> = rows.into_iter().map(|row: sqlx::postgres::PgRow| {
             use sqlx::Row;
             UserMessageDetail {
                 id: row.try_get("id").unwrap_or(0),
@@ -219,13 +219,13 @@ impl MessageRepository {
             }
         }).collect();
 
-        Ok(messages)
+        Ok(t_sys_messages)
     }
 
     pub async fn mark_as_read(&self, message_id: i64, user_id: i64) -> AppResult<()> {
         sqlx::query(
             r#"
-            UPDATE user_messages
+            UPDATE t_sys_user_messages
             SET is_read = 1, read_at = NOW()
             WHERE message_id = $1 AND user_id = $2
             "#
@@ -241,7 +241,7 @@ impl MessageRepository {
     pub async fn batch_mark_as_read(&self, message_ids: &[i64], user_id: i64) -> AppResult<()> {
         sqlx::query(
             r#"
-            UPDATE user_messages
+            UPDATE t_sys_user_messages
             SET is_read = 1, read_at = NOW()
             WHERE message_id = ANY($1) AND user_id = $2
             "#
@@ -259,9 +259,9 @@ impl MessageRepository {
             Some(cat) => {
                 sqlx::query(
                     r#"
-                    UPDATE user_messages um
+                    UPDATE t_sys_user_messages um
                     SET is_read = 1, read_at = NOW()
-                    FROM messages m
+                    FROM t_sys_messages m
                     WHERE um.message_id = m.id
                       AND um.user_id = $1
                       AND m.category = $2
@@ -276,7 +276,7 @@ impl MessageRepository {
             None => {
                 sqlx::query(
                     r#"
-                    UPDATE user_messages
+                    UPDATE t_sys_user_messages
                     SET is_read = 1, read_at = NOW()
                     WHERE user_id = $1 AND is_deleted = 0
                     "#
@@ -293,7 +293,7 @@ impl MessageRepository {
     pub async fn delete_message(&self, message_id: i64, user_id: i64) -> AppResult<()> {
         sqlx::query(
             r#"
-            UPDATE user_messages
+            UPDATE t_sys_user_messages
             SET is_deleted = 1, deleted_at = NOW()
             WHERE message_id = $1 AND user_id = $2
             "#
@@ -309,7 +309,7 @@ impl MessageRepository {
     pub async fn batch_delete(&self, message_ids: &[i64], user_id: i64) -> AppResult<()> {
         sqlx::query(
             r#"
-            UPDATE user_messages
+            UPDATE t_sys_user_messages
             SET is_deleted = 1, deleted_at = NOW()
             WHERE message_id = ANY($1) AND user_id = $2
             "#
@@ -325,7 +325,7 @@ impl MessageRepository {
     pub async fn pin_message(&self, message_id: i64, user_id: i64, pinned: bool) -> AppResult<()> {
         sqlx::query(
             r#"
-            UPDATE user_messages
+            UPDATE t_sys_user_messages
             SET is_pinned = $1
             WHERE message_id = $2 AND user_id = $3
             "#
@@ -347,7 +347,7 @@ impl MessageRepository {
     ) -> AppResult<()> {
         sqlx::query(
             r#"
-            UPDATE messages
+            UPDATE t_sys_messages
             SET status = $1, sent_at = $2
             WHERE id = $3
             "#
@@ -371,7 +371,7 @@ impl MessageRepository {
     ) -> AppResult<()> {
         sqlx::query(
             r#"
-            INSERT INTO message_push_logs (message_id, user_id, channel, status, error_msg)
+            INSERT INTO t_sys_message_push_logs (message_id, user_id, channel, status, error_msg)
             VALUES ($1, $2, $3, $4, $5)
             "#
         )
@@ -395,8 +395,8 @@ impl MessageRepository {
         let result = sqlx::query(
             r#"
             SELECT COUNT(*) as count
-            FROM user_messages um
-            JOIN messages m ON um.message_id = m.id
+            FROM t_sys_user_messages um
+            JOIN t_sys_messages m ON um.message_id = m.id
             WHERE um.user_id = $1
               AND um.is_deleted = 0
               AND ($2::VARCHAR IS NULL OR m.category = $2)
@@ -420,9 +420,9 @@ impl MessageRepository {
     ) -> AppResult<Vec<Message>> {
         let offset = (page - 1) * page_size;
 
-        let messages = sqlx::query_as(
+        let t_sys_messages = sqlx::query_as(
             r#"
-            SELECT * FROM messages
+            SELECT * FROM t_sys_messages
             WHERE tenant_id = $1
             ORDER BY created_at DESC
             LIMIT $2 OFFSET $3
@@ -434,11 +434,11 @@ impl MessageRepository {
         .fetch_all(&self.db)
         .await?;
 
-        Ok(messages)
+        Ok(t_sys_messages)
     }
 
     pub async fn count_messages(&self, tenant_id: i64) -> AppResult<i64> {
-        let result = sqlx::query("SELECT COUNT(*) as count FROM messages WHERE tenant_id = $1")
+        let result = sqlx::query("SELECT COUNT(*) as count FROM t_sys_messages WHERE tenant_id = $1")
             .bind(tenant_id)
             .fetch_one(&self.db)
             .await?;
@@ -447,7 +447,7 @@ impl MessageRepository {
     }
 
     pub async fn cancel_message(&self, message_id: i64) -> AppResult<()> {
-        sqlx::query("UPDATE messages SET status = 2 WHERE id = $1")
+        sqlx::query("UPDATE t_sys_messages SET status = 2 WHERE id = $1")
             .bind(message_id)
             .execute(&self.db)
             .await?;
@@ -456,9 +456,9 @@ impl MessageRepository {
     }
 
     pub async fn get_scheduled_messages(&self) -> AppResult<Vec<Message>> {
-        let messages = sqlx::query_as(
+        let t_sys_messages = sqlx::query_as(
             r#"
-            SELECT * FROM messages
+            SELECT * FROM t_sys_messages
             WHERE status = 0
               AND scheduled_at IS NOT NULL
               AND scheduled_at <= NOW()
@@ -468,6 +468,6 @@ impl MessageRepository {
         .fetch_all(&self.db)
         .await?;
 
-        Ok(messages)
+        Ok(t_sys_messages)
     }
 }

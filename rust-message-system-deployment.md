@@ -14,7 +14,7 @@
 | P1 - 核心服务实现 | 8 | 0 | 0 | 0 | 0% |
 | P2 - 消息队列集成 | 4 | 0 | 0 | 0 | 0% |
 | P3 - WebSocket 实时通信 | 4 | 0 | 0 | 0 | 0% |
-| P4 - 多渠道推送集成 | 5 | 0 | 0 | 0 | 0% |
+| P4 - 多渠道推送集成 | 5 | 1 | 2 | 0 | 40% |
 | P5 - 测试与优化 | 5 | 0 | 0 | 0 | 0% |
 | P6 - 部署与监控 | 6 | 0 | 0 | 0 | 0% |
 | **TOTAL** | **39** | **0** | **0** | **0** | **0%** |
@@ -96,11 +96,11 @@
 
 | ID | Task | Status | Owner | Notes |
 |----|------|--------|-------|-------|
-| P4-T001 | 实现 PushService 推送服务 | Not Started | - | push_to_users, 在线/离线处理逻辑 |
-| P4-T002 | 实现邮件推送 (Lettre) | Not Started | - | SMTP 配置，邮件发送 |
-| P4-T003 | 实现钉钉机器人推送 | Not Started | - | Webhook 调用，消息格式化 |
+| P4-T001 | 实现 PushService 推送服务 | Completed | - | push_to_users, 在线/离线处理逻辑 |
+| P4-T002 | 实现邮件推送 (Lettre) | In Progress | - | 邮件渠道插件已创建，待接入 SMTP 详情 |
+| P4-T003 | 实现钉钉机器人推送 | In Progress | - | 钉钉渠道插件已创建，待接入 webhook 详情 |
 | P4-T004 | 实现用户消息设置管理 | Not Started | - | user_message_settings CRUD |
-| P4-T005 | 实现推送日志记录 (message_push_logs) | Not Started | - | log_push 方法 |
+| P4-T005 | 实现推送日志记录 (message_push_logs) | Completed | - | log_push 已在 PushService 中使用 |
 
 ---
 

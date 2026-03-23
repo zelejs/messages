@@ -2,7 +2,7 @@
 /target/
 **/*.rs.bk
 *.pdb
-
+._*
 # Cargo lock file (optional - uncomment if not committing)
 # Cargo.lock
 
