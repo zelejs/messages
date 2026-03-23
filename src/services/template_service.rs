@@ -5,6 +5,7 @@ use crate::{
 };
 use sqlx::PgPool;
 
+#[derive(Clone)]
 pub struct TemplateService {
     repo: TemplateRepository,
 }

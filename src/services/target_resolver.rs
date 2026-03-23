@@ -9,6 +9,7 @@ use crate::{
 use sqlx::PgPool;
 use std::collections::HashSet;
 
+#[derive(Clone)]
 pub struct TargetResolver {
     user_repo: UserRepository,
     org_repo: OrganizationRepository,

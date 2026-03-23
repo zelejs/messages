@@ -15,6 +15,27 @@ pub struct Config {
     pub smtp_username: String,
     pub smtp_password: String,
     pub dingtalk_webhook: String,
+    pub channel_config: ChannelConfig,
+}
+
+/// 渠道开关配置 - 从环境变量读取
+#[derive(Debug, Clone, Deserialize)]
+pub struct ChannelConfig {
+    pub websocket_enabled: bool,
+    pub email_enabled: bool,
+    pub dingtalk_enabled: bool,
+    pub sms_enabled: bool,
+}
+
+impl Default for ChannelConfig {
+    fn default() -> Self {
+        Self {
+            websocket_enabled: true,
+            email_enabled: false,
+            dingtalk_enabled: false,
+            sms_enabled: false,
+        }
+    }
 }
 
 impl Config {
@@ -38,6 +59,31 @@ impl Config {
             smtp_username: env::var("SMTP_USERNAME").unwrap_or_default(),
             smtp_password: env::var("SMTP_PASSWORD").unwrap_or_default(),
             dingtalk_webhook: env::var("DINGTALK_WEBHOOK").unwrap_or_default(),
+            channel_config: ChannelConfig::from_env(),
         })
+    }
+}
+
+impl ChannelConfig {
+    /// 从环境变量读取渠道开关配置
+    pub fn from_env() -> Self {
+        Self {
+            websocket_enabled: env::var("CHANNEL_WEBSOCKET_ENABLED")
+                .unwrap_or_else(|_| "true".to_string())
+                .parse()
+                .unwrap_or(true),
+            email_enabled: env::var("CHANNEL_EMAIL_ENABLED")
+                .unwrap_or_else(|_| "false".to_string())
+                .parse()
+                .unwrap_or(false),
+            dingtalk_enabled: env::var("CHANNEL_DINGTALK_ENABLED")
+                .unwrap_or_else(|_| "false".to_string())
+                .parse()
+                .unwrap_or(false),
+            sms_enabled: env::var("CHANNEL_SMS_ENABLED")
+                .unwrap_or_else(|_| "false".to_string())
+                .parse()
+                .unwrap_or(false),
+        }
     }
 }

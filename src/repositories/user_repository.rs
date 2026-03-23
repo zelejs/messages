@@ -85,7 +85,7 @@ impl UserRepository {
     }
 
     pub async fn get_message_settings(&self, user_id: i64) -> AppResult<Vec<UserMessageSetting>> {
-        let settings = sqlx::query_as("SELECT * FROM user_message_settings WHERE user_id = $1")
+        let settings = sqlx::query_as("SELECT * FROM t_sys_user_message_settings WHERE user_id = $1")
             .bind(user_id)
             .fetch_all(&self.db)
             .await?;
@@ -99,7 +99,7 @@ impl UserRepository {
         category: &str,
     ) -> AppResult<Option<UserMessageSetting>> {
         let setting = sqlx::query_as(
-            "SELECT * FROM user_message_settings WHERE user_id = $1 AND category = $2"
+            "SELECT * FROM t_sys_user_message_settings WHERE user_id = $1 AND category = $2"
         )
         .bind(user_id)
         .bind(category)
@@ -122,19 +122,19 @@ impl UserRepository {
     ) -> AppResult<()> {
         sqlx::query(
             r#"
-            INSERT INTO user_message_settings (
+            INSERT INTO t_sys_user_message_settings (
                 user_id, category, web_enabled, email_enabled, dingtalk_enabled,
                 do_not_disturb, dnd_start_time, dnd_end_time
             )
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             ON CONFLICT (user_id, category)
             DO UPDATE SET
-                web_enabled = COALESCE(EXCLUDED.web_enabled, user_message_settings.web_enabled),
-                email_enabled = COALESCE(EXCLUDED.email_enabled, user_message_settings.email_enabled),
-                dingtalk_enabled = COALESCE(EXCLUDED.dingtalk_enabled, user_message_settings.dingtalk_enabled),
-                do_not_disturb = COALESCE(EXCLUDED.do_not_disturb, user_message_settings.do_not_disturb),
-                dnd_start_time = COALESCE(EXCLUDED.dnd_start_time, user_message_settings.dnd_start_time),
-                dnd_end_time = COALESCE(EXCLUDED.dnd_end_time, user_message_settings.dnd_end_time)
+                web_enabled = COALESCE(EXCLUDED.web_enabled, t_sys_user_message_settings.web_enabled),
+                email_enabled = COALESCE(EXCLUDED.email_enabled, t_sys_user_message_settings.email_enabled),
+                dingtalk_enabled = COALESCE(EXCLUDED.dingtalk_enabled, t_sys_user_message_settings.dingtalk_enabled),
+                do_not_disturb = COALESCE(EXCLUDED.do_not_disturb, t_sys_user_message_settings.do_not_disturb),
+                dnd_start_time = COALESCE(EXCLUDED.dnd_start_time, t_sys_user_message_settings.dnd_start_time),
+                dnd_end_time = COALESCE(EXCLUDED.dnd_end_time, t_sys_user_message_settings.dnd_end_time)
             "#
         )
         .bind(user_id)

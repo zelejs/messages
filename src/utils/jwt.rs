@@ -6,6 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub struct Claims {
     pub sub: String, // user_id
     pub tenant_id: i64,
+    pub org_id: Option<i64>,
     pub exp: usize,
 }
 
@@ -27,7 +28,7 @@ impl JwtService {
     }
 
     #[allow(dead_code)]
-    pub fn generate(&self, user_id: &str, tenant_id: i64) -> Result<String, String> {
+    pub fn generate(&self, user_id: &str, tenant_id: i64, org_id: Option<i64>) -> Result<String, String> {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_err(|e| e.to_string())?;
@@ -37,6 +38,7 @@ impl JwtService {
         let claims = Claims {
             sub: user_id.to_string(),
             tenant_id,
+            org_id,
             exp,
         };
 
@@ -52,5 +54,36 @@ impl JwtService {
         .map_err(|e| e.to_string())?;
 
         Ok(token_data.claims)
+    }
+
+    pub fn get_user_id(&self, token: &str) -> Result<i64, String> {
+        let claims = self.verify(token)?;
+        claims.sub.parse::<i64>().map_err(|e| e.to_string())
+    }
+
+    pub fn get_tenant_id(&self, token: &str) -> Result<i64, String> {
+        let claims = self.verify(token)?;
+        Ok(claims.tenant_id)
+    }
+
+    pub fn get_org_id(&self, token: &str) -> Result<Option<i64>, String> {
+        let claims = self.verify(token)?;
+        Ok(claims.org_id)
+    }
+}
+
+pub struct JwtKit;
+
+impl JwtKit {
+    pub fn get_user_id_from_claims(claims: &Claims) -> Result<i64, String> {
+        claims.sub.parse::<i64>().map_err(|e| e.to_string())
+    }
+
+    pub fn get_org_id_from_claims(claims: &Claims) -> Option<i64> {
+        claims.org_id
+    }
+
+    pub fn get_tenant_id_from_claims(claims: &Claims) -> i64 {
+        claims.tenant_id
     }
 }

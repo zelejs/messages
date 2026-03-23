@@ -66,11 +66,11 @@ pub async fn list_all_messages(
     let page = query.page.unwrap_or(1);
     let page_size = query.page_size.unwrap_or(20);
 
-    let messages = repo.list_messages(tenant_id, page, page_size).await?;
+    let t_sys_messages = repo.list_messages(tenant_id, page, page_size).await?;
 
     let total = repo.count_messages(tenant_id).await?;
 
-    Ok(Json(PaginatedResponse::new(messages, total, page, page_size)))
+    Ok(Json(PaginatedResponse::new(t_sys_messages, total, page, page_size)))
 }
 
 pub async fn get_message_details(
@@ -113,7 +113,7 @@ pub async fn get_push_logs(
     State(_state): State<Arc<AppState>>,
     Path(_id): Path<i64>,
 ) -> AppResult<Json<Vec<PushLogResponse>>> {
-    // TODO: Query message_push_logs table
+    // TODO: Query t_sys_message_push_logs table
     // For now, return empty vector
     Ok(Json(vec![]))
 }

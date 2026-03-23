@@ -14,6 +14,7 @@ use crate::{config::Config, error::AppError, utils::jwt::JwtService};
 pub struct AuthContext {
     pub user_id: i64,
     pub tenant_id: i64,
+    pub org_id: Option<i64>,
     pub username: String,
 }
 
@@ -65,13 +66,13 @@ pub async fn auth_middleware(
 
             match jwt_service.verify(token) {
                 Ok(claims) => {
-                    // Parse user_id from claims.sub
                     let user_id: i64 = claims.sub.parse().unwrap_or(0);
 
                     let auth_ctx = AuthContext {
                         user_id,
                         tenant_id: claims.tenant_id,
-                        username: claims.sub,
+                        org_id: claims.org_id,
+                        username: claims.sub.clone(),
                     };
 
                     req.extensions_mut().insert(auth_ctx);

@@ -27,8 +27,6 @@ message-system/
 ├── .env
 ├── migrations/              # 数据库迁移文件
 │   ├── 20240101_create_tenants.sql
-│   ├── 20240102_create_organizations.sql
-│   ├── 20240103_create_users.sql
 │   └── ...
 ├── src/
 │   ├── main.rs             # 入口文件
@@ -37,8 +35,6 @@ message-system/
 │   ├── models/             # 数据模型
 │   │   ├── mod.rs
 │   │   ├── tenant.rs
-│   │   ├── organization.rs
-│   │   ├── user.rs
 │   │   ├── message.rs
 │   │   └── message_template.rs
 │   ├── handlers/           # API 处理器
@@ -55,9 +51,7 @@ message-system/
 │   │   └── template_service.rs
 │   ├── repositories/       # 数据访问层
 │   │   ├── mod.rs
-│   │   ├── message_repository.rs
-│   │   ├── user_repository.rs
-│   │   └── organization_repository.rs
+│   │   └── message_repository.rs
 │   ├── websocket/          # WebSocket 处理
 │   │   ├── mod.rs
 │   │   ├── handler.rs
@@ -79,6 +73,302 @@ message-system/
 │       └── pagination.rs
 └── tests/
     └── integration/
+```
+
+---
+
+## 系统架构设计
+
+### 实时通信与消息队列的架构关系
+
+本系统采用 **WebSocket + RabbitMQ** 的混合架构，实现高可靠、高并发的消息推送。
+
+#### 1. 架构概览
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                              客户端 (浏览器/App)                          │
+│  ┌─────────────┐                                                        │
+│  │ WebSocket连接 │ ←───────────────────────────────────────────────────┐ │
+│  └──────┬──────┘                                                     │ │
+└─────────┼────────────────────────────────────────────────────────────┘ │
+          │                                                              │
+          │ 1. 建立长连接                                                  │
+          │ 2. 实时推送/接收消息                                             │
+          │                                                              │
+┌─────────▼────────────────────────────────────────────────────────────┐ │
+│                          API Gateway (Axum)                          │ │
+│  ┌─────────────────┐    ┌──────────────────────────────────────────┐  │ │
+│  │  WS /ws/:tenant │    │  HTTP POST /api/messages/send            │  │ │
+│  │     ↑↓ 双向     │    │     ↓                                    │  │ │
+│  └─────┬───────────┘    └─────┬────────────────────────────────────┘  │ │
+└────────┼───────────────────────┼───────────────────────────────────────┘
+         │                       │
+         │                       │ 3. 调用发送接口
+         │                       │
+┌────────▼───────────────────────▼─────────────────────────────────────┐
+│                          MessageService                              │
+│  ┌─────────────────────────────────────────────────────────────────┐ │
+│  │  send_message()                                                  │ │
+│  │    ├── 创建消息记录 (DB)                                          │ │
+│  │    ├── 保存目标规则 (DB)                                          │ │
+│  │    └── 发布到消息队列 → publish_message(message_id)                │ │
+│  └─────────────────────────────────────────────────────────────────┘ │
+└─────────────────────────────┬──────────────────────────────────────────┘
+                              │ 4. 异步投递
+                              ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│                        RabbitMQ 消息队列                              │
+│  ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐  │
+│  │  message_queue  │───→│ message_queue    │───→│ message_queue   │  │
+│  │    (主队列)      │    │    _retry (重试)  │    │    _dlq (死信)   │  │
+│  └─────────────────┘    └──────────────────┘    └─────────────────┘  │
+└─────────────────────────────┬──────────────────────────────────────────┘
+                              │ 5. 消费消息
+                              ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│                        Queue Consumer                                │
+│  ┌─────────────────────────────────────────────────────────────────┐ │
+│  │  process_message(message_id)                                     │ │
+│  │    ├── 获取消息和目标用户                                         │ │
+│  │    ├── 解析目标用户列表                                           │ │
+│  │    └── 调用 PushService.push_to_users()                          │ │
+│  └─────────────────────────────────────────────────────────────────┘ │
+└─────────────────────────────┬──────────────────────────────────────────┘
+                              │ 6. 多渠道推送
+                              ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│                        PushService                                   │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────────┐   │
+│  │  WebSocketChannel │  │  EmailChannel    │  │  DingTalkChannel    │   │
+│  │    (实时通道)      │  │    (异步邮件)     │  │    (企业IM)         │   │
+│  │                   │  │                   │  │                     │   │
+│  │  ws_manager.send  │  │  SMTP发送         │  │  Webhook调用         │   │
+│  │     ↓             │  │     ↓             │  │     ↓               │   │
+│  │  在线用户←───────────┘  │  离线用户收到邮件  │  │  移动端收到通知      │   │
+│  └─────────────────┘  └─────────────────┘  └─────────────────────┘   │
+└──────────────────────────────────────────────────────────────────────┘
+                              │
+                              │ 7. WebSocket 实时推送
+                              ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│                      WebSocketManager                                │
+│  ┌─────────────────────────────────────────────────────────────────┐ │
+│  │  connections: HashMap<(tenant_id, user_id), UnboundedSender>    │ │
+│  │                                                                 │ │
+│  │  send_to_user(tenant_id, user_id, payload)                      │ │
+│  │    └── 找到对应连接 → tx.send(msg) → 推送到客户端                   │ │
+│  └─────────────────────────────────────────────────────────────────┘ │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+#### 2. 分层职责
+
+| 层级 | 组件 | 职责 |
+|------|------|------|
+| **接入层** | WebSocket | 维护客户端长连接，双向实时通信 |
+| **业务层** | MessageService | 处理发送请求，持久化消息 |
+| **队列层** | RabbitMQ | 异步解耦，削峰填谷，保证可靠投递 |
+| **推送层** | PushService | 多渠道并行推送 |
+| **管理器** | WebSocketManager | 管理连接状态，路由消息到在线用户 |
+
+#### 3. 核心流程
+
+```
+发送消息 → 存DB → 入队(MQ) → 消费 → 解析目标用户 → 并行推送各渠道
+                                   ↓
+                              ┌────────┐
+                              │WebSocket│ → 在线用户立即收到 (实时)
+                              │ Email   │ → 离线/备用渠道 (可靠)
+                              │DingTalk │ → 移动端推送 (可达)
+                              └────────┘
+```
+
+#### 4. 设计决策说明
+
+| 设计决策 | 原因 |
+|---------|------|
+| **MQ 在 WebSocket 之前** | 发送是异步的，即使推送失败也可重试；削峰保护 WebSocket 服务 |
+| **WebSocket 作为渠道之一** | 只是众多推送渠道中的一个，统一抽象为 `MessageChannel` |
+| **消费端再查DB** | 消息队列只存ID，消费时查最新状态，避免消息过期/重复问题 |
+| **DLQ 死信队列** | 最终失败的消息不丢失，可人工处理或后续补偿 |
+| **重试机制** | 最大3次重试，指数退避，避免瞬时故障导致消息丢失 |
+
+#### 5. 时序图
+
+```
+Client          API             MQ            Consumer        PushService      WSManager
+  │              │              │               │                │               │
+  │ ──────────WS连接──────────→ │               │                │               │
+  │              │              │               │                │               │
+  │ ─发送消息───→│              │               │                │               │
+  │              │ ──存DB────→ │               │                │               │
+  │              │ ──发布MQ────→│               │                │               │
+  │ ←─返回ID────│              │               │                │               │
+  │              │              │               │                │               │
+  │              │              │ ──消费消息───→│                │               │
+  │              │              │               │ ──解析用户────→│               │
+  │              │              │               │                │ ──遍历渠道───→│
+  │              │              │               │                │               │
+  │ ←──────────实时推送───────────────WebSocketChannel.send()───────────────────→│
+  │              │              │               │                │               │
+```
+
+---
+
+## 消息源与消息目标数据流架构
+
+### 架构概览
+
+本消息系统支持多种**消息源**向多种**目标类型**分发消息，通过统一的渠道抽象实现灵活的推送策略。
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                              消息源 (Message Source)                                 │
+├─────────────────┬─────────────────┬─────────────────┬───────────────────────────────┤
+│   系统消息源     │   组织消息源     │   审批任务源    │      外部集成源                │
+│   (System)      │   (Org)         │   (Workflow)    │      (External)               │
+├─────────────────┼─────────────────┼─────────────────┼───────────────────────────────┤
+│ • 系统公告      │ • 部门通知      │ • 待办任务      │ • 第三方系统 webhook          │
+│ • 安全提醒      │ • 组织变更      │ • 审批结果      │ • 定时任务触发                │
+│ • 维护通知      │ • 活动通知      │ • 抄送消息      │ • 数据同步事件                │
+└────────┬────────┴────────┬────────┴────────┬────────┴────────┬──────────────────────┘
+         │                 │                 │                 │
+         └─────────────────┴────────┬────────┴─────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                          消息分发服务 (Message Dispatcher)                           │
+│  ┌───────────────────────────────────────────────────────────────────────────────┐  │
+│  │  dispatch(message, source_type, target_rules)                                  │  │
+│  │    ├── 根据 source_type 设置消息类别                                            │  │
+│  │    ├── 根据 target_rules 解析目标用户列表                                       │  │
+│  │    └── 调用各渠道推送器并行发送                                                 │  │
+│  └───────────────────────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────┬───────────────────────────────────────────────────┘
+                                  │
+          ┌───────────────────────┼───────────────────────┐
+          │                       │                       │
+          ▼                       ▼                       ▼
+┌─────────────────┐   ┌─────────────────┐   ┌─────────────────────────────────────────┐
+│   目标类型解析    │   │   渠道选择策略   │   │           推送渠道实现                   │
+├─────────────────┤   ├─────────────────┤   ├─────────────┬─────────────┬─────────────┤
+│ • 目标组织       │   │ • WebSocket     │   │  WebSocket  │   Email     │  DingTalk   │
+│   (org_ids)     │   │ • Email         │   │   (实时)    │   (邮件)    │   (钉钉)    │
+│ • 目标角色       │   │ • DingTalk      │   ├─────────────┼─────────────┼─────────────┤
+│   (role_codes)  │   │ • LogFile       │   │   SMS       │   LogFile   │   (其他)    │
+│ • 目标用户       │   │ • SMS           │   │   (短信)    │  (日志STUB) │             │
+│   (user_ids)    │   │                 │   │             │             │             │
+│ • 自定义条件     │   │                 │   │             │             │             │
+└─────────────────┘   └─────────────────┘   └─────────────┴─────────────┴─────────────┘
+```
+
+### 消息源类型定义
+
+| 消息源 | source_type | 说明 | 典型场景 |
+|--------|-------------|------|----------|
+| **系统** | `system` | 平台级消息，面向所有用户或特定范围 | 系统公告、安全提醒、版本更新 |
+| **组织** | `organization` | 部门/组织级消息，面向组织内成员 | 部门通知、组织活动、人员变更 |
+| **审批任务** | `workflow` | 流程审批相关消息，面向任务相关人 | 待办提醒、审批结果、抄送通知 |
+| **外部集成** | `external` | 第三方系统触发的消息 | API调用、Webhook事件、数据同步 |
+
+### 目标类型定义
+
+| 目标类型 | target_type | 解析方式 | 数据来源 |
+|----------|-------------|----------|----------|
+| **指定用户** | `user` | 直接使用 user_ids | 请求传入（外部服务已解析） |
+| **组织架构** | `org` | 外部服务解析 org_ids → user_ids | 外部组织服务 |
+| **角色** | `role` | 外部服务解析 role_codes → user_ids | 外部权限服务 |
+| **自定义** | `custom` | 外部服务根据条件解析 | 外部查询服务 |
+
+### 消息类型映射
+
+```
+消息源 + 业务场景 → 消息类型 (msg_type)
+
+系统 (system)
+  ├── 公告通知 → system_announcement
+  ├── 安全提醒 → system_security
+  └── 维护通知 → system_maintenance
+
+组织 (organization)
+  ├── 部门通知 → org_department
+  ├── 组织变更 → org_change
+  └── 活动通知 → org_activity
+
+审批任务 (workflow)
+  ├── 待办任务 → workflow_todo
+  ├── 审批结果 → workflow_result
+  └── 抄送通知 → workflow_cc
+```
+
+### 数据流详细设计
+
+#### 1. 消息分发日志结构
+
+每条消息分发记录包含以下信息：
+
+```rust
+struct MessageDispatchLog {
+    // 时间信息
+    timestamp: DateTime<Utc>,          // 分发时间
+    message_id: String,                 // 消息唯一标识
+
+    // 消息源信息
+    source_type: MessageSource,         // 消息源类型
+    source_detail: String,              // 具体来源（系统模块/组织ID/审批流程ID）
+
+    // 目标信息
+    target_orgs: Vec<i64>,              // 目标组织ID列表
+    target_roles: Vec<String>,          // 目标角色编码列表
+    target_users: Vec<i64>,             // 目标用户ID列表
+
+    // 消息分类
+    msg_type: MessageType,              // 消息类型（系统/组织/任务）
+    category: String,                   // 业务分类
+
+    // 分发结果
+    channels: Vec<String>,              // 使用的渠道
+    status: DispatchStatus,             // 分发状态
+}
+```
+
+#### 2. 日志文件格式
+
+```
+# 日志文件: logs/message-dispatch.2024-01-01.log
+
+[2024-01-01T09:15:30.123Z] MSG_abc123 | SOURCE:system | FROM:system_monitor | TYPE:system_security | ORGS:[] | ROLES:[] | USERS:[1001,1002,1003] | CHANNELS:[websocket,log] | STATUS:success
+[2024-01-01T09:20:45.456Z] MSG_def456 | SOURCE:organization | FROM:org_10 | TYPE:org_department | ORGS:[10,11] | ROLES:[] | USERS:[2001,2002,2003,2004] | CHANNELS:[websocket,log] | STATUS:success
+[2024-01-01T09:25:12.789Z] MSG_ghi789 | SOURCE:workflow | FROM:wf_approval_123 | TYPE:workflow_todo | ORGS:[] | ROLES:[manager] | USERS:[3001] | CHANNELS:[websocket,log] | STATUS:success
+```
+
+#### 3. 渠道抽象接口
+
+```rust
+#[async_trait]
+pub trait MessageChannel: Send + Sync {
+    /// 渠道名称
+    fn name(&self) -> &str;
+
+    /// 是否支持该消息类型
+    fn supports(&self, msg_type: &MessageType) -> bool;
+
+    /// 发送消息
+    async fn send(
+        &self,
+        message: &Message,
+        target: &DispatchTarget,
+    ) -> Result<ChannelResult, ChannelError>;
+}
+
+/// 分发目标
+pub struct DispatchTarget {
+    pub user_id: i64,
+    pub org_id: Option<i64>,
+    pub role_codes: Vec<String>,
+    pub channels: Vec<String>,
+}
 ```
 
 ---
@@ -105,108 +395,27 @@ COMMENT ON COLUMN tenants.tenant_code IS '租户编码';
 COMMENT ON COLUMN tenants.status IS '状态 1:正常 0:禁用';
 ```
 
-### 2. 组织架构表 (organizations)
+### 说明：用户与组织数据来源
 
-```sql
-CREATE TABLE organizations (
-    id BIGSERIAL PRIMARY KEY,
-    tenant_id BIGINT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    parent_id BIGINT DEFAULT 0,
-    org_code VARCHAR(50) NOT NULL,
-    org_name VARCHAR(100) NOT NULL,
-    org_type VARCHAR(20),
-    level INT DEFAULT 1,
-    path VARCHAR(500),
-    status SMALLINT DEFAULT 1,
-    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-);
+> 用户信息（`user_id`、`org_id`、`role_codes` 等）**不在本模块维护**，统一从 JWT Token 中解析获取。
+>
+> JWT Claims 结构示例：
+> ```json
+> {
+>   "sub": "123456",
+>   "tenant_id": 1,
+>   "org_id": 10,
+>   "org_path": "1/3/10",
+>   "roles": ["admin", "teacher"],
+>   "exp": 1700000000
+> }
+> ```
+>
+> - 消息发送时，`sender_id` / `tenant_id` 从 JWT 提取
+> - 目标规则中的 `user_ids` / `org_ids` / `role_codes` 由调用方直接传入（通过外部用户/组织服务解析后传递）
+> - 本模块仅负责消息的存储、路由和推送，不查询用户组织表
 
-CREATE INDEX idx_organizations_tenant ON organizations(tenant_id);
-CREATE INDEX idx_organizations_parent ON organizations(parent_id);
-CREATE INDEX idx_organizations_path ON organizations USING gin(path gin_trgm_ops);
-CREATE UNIQUE INDEX idx_organizations_code ON organizations(tenant_id, org_code);
-
-COMMENT ON TABLE organizations IS '组织架构表';
-COMMENT ON COLUMN organizations.org_type IS '组织类型:department/team/group';
-COMMENT ON COLUMN organizations.path IS '组织路径 如:1/2/5';
-```
-
-### 3. 用户表 (users)
-
-```sql
-CREATE TABLE users (
-    id BIGSERIAL PRIMARY KEY,
-    tenant_id BIGINT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    username VARCHAR(50) UNIQUE NOT NULL,
-    email VARCHAR(100),
-    phone VARCHAR(20),
-    status SMALLINT DEFAULT 1,
-    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-    last_login_at TIMESTAMPTZ
-);
-
-CREATE INDEX idx_users_tenant ON users(tenant_id);
-CREATE INDEX idx_users_username ON users(username);
-CREATE INDEX idx_users_status ON users(status);
-
-COMMENT ON TABLE users IS '用户表';
-```
-
-### 4. 用户组织关系表 (user_organizations)
-
-```sql
-CREATE TABLE user_organizations (
-    id BIGSERIAL PRIMARY KEY,
-    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    organization_id BIGINT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
-    is_primary SMALLINT DEFAULT 0,
-    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(user_id, organization_id)
-);
-
-CREATE INDEX idx_user_organizations_org ON user_organizations(organization_id);
-
-COMMENT ON TABLE user_organizations IS '用户组织关系表';
-COMMENT ON COLUMN user_organizations.is_primary IS '是否主组织';
-```
-
-### 5. 角色表 (roles)
-
-```sql
-CREATE TABLE roles (
-    id BIGSERIAL PRIMARY KEY,
-    tenant_id BIGINT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    role_code VARCHAR(50) NOT NULL,
-    role_name VARCHAR(100) NOT NULL,
-    status SMALLINT DEFAULT 1,
-    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(tenant_id, role_code)
-);
-
-CREATE INDEX idx_roles_tenant ON roles(tenant_id);
-
-COMMENT ON TABLE roles IS '角色表';
-```
-
-### 6. 用户角色关系表 (user_roles)
-
-```sql
-CREATE TABLE user_roles (
-    id BIGSERIAL PRIMARY KEY,
-    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    role_id BIGINT NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
-    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(user_id, role_id)
-);
-
-CREATE INDEX idx_user_roles_role ON user_roles(role_id);
-
-COMMENT ON TABLE user_roles IS '用户角色关系表';
-```
-
-### 7. 消息模板表 (message_templates)
+### 2. 消息模板表 (message_templates)
 
 ```sql
 CREATE TABLE message_templates (
@@ -236,7 +445,7 @@ COMMENT ON COLUMN message_templates.jump_type IS '跳转类型:url/route/action'
 COMMENT ON COLUMN message_templates.channels IS '推送渠道 ["web","email","dingtalk"]';
 ```
 
-### 8. 消息表 (messages)
+### 3. 消息表 (messages)
 
 ```sql
 CREATE TABLE messages (
@@ -255,8 +464,11 @@ CREATE TABLE messages (
     scheduled_at TIMESTAMPTZ,
     sent_at TIMESTAMPTZ,
     expire_at TIMESTAMPTZ,
-    sender_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    sender_id BIGINT,  -- 来自 JWT，不维护外键
     sender_type VARCHAR(20) DEFAULT 'user',
+    -- 消息源信息
+    source_type VARCHAR(20) DEFAULT 'system',  -- 消息源类型: system/organization/workflow/external
+    source_detail VARCHAR(100),                 -- 消息源详情（系统模块/组织ID/流程ID）
     status SMALLINT DEFAULT 0,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
@@ -272,10 +484,12 @@ CREATE INDEX idx_messages_created ON messages(created_at DESC);
 COMMENT ON TABLE messages IS '消息表';
 COMMENT ON COLUMN messages.send_type IS '发送类型 1:立即 2:定时';
 COMMENT ON COLUMN messages.sender_type IS 'user/system';
+COMMENT ON COLUMN messages.source_type IS '消息源类型: system/organization/workflow/external';
+COMMENT ON COLUMN messages.source_detail IS '消息源详情: 系统模块名/组织ID/审批流程ID';
 COMMENT ON COLUMN messages.status IS '0:待发送 1:已发送 2:已取消 3:失败';
 ```
 
-### 9. 消息接收规则表 (message_target_rules)
+### 4. 消息接收规则表 (message_target_rules)
 
 ```sql
 CREATE TABLE message_target_rules (
@@ -295,13 +509,13 @@ COMMENT ON COLUMN message_target_rules.target_scope IS '目标范围配置';
 COMMENT ON COLUMN message_target_rules.filter_conditions IS '筛选条件';
 ```
 
-### 10. 用户消息表 (user_messages)
+### 5. 用户消息表 (user_messages)
 
 ```sql
 CREATE TABLE user_messages (
     id BIGSERIAL PRIMARY KEY,
     message_id BIGINT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
-    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    user_id BIGINT NOT NULL,  -- 来自 JWT，不维护外键
     tenant_id BIGINT NOT NULL,
     is_read SMALLINT DEFAULT 0,
     read_at TIMESTAMPTZ,
@@ -323,12 +537,12 @@ COMMENT ON COLUMN user_messages.is_deleted IS '是否删除';
 COMMENT ON COLUMN user_messages.is_pinned IS '是否置顶';
 ```
 
-### 11. 用户消息配置表 (user_message_settings)
+### 6. 用户消息配置表 (user_message_settings)
 
 ```sql
 CREATE TABLE user_message_settings (
     id BIGSERIAL PRIMARY KEY,
-    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    user_id BIGINT NOT NULL,  -- 来自 JWT，不维护外键
     category VARCHAR(30),
     web_enabled SMALLINT DEFAULT 1,
     email_enabled SMALLINT DEFAULT 0,
@@ -348,7 +562,7 @@ COMMENT ON COLUMN user_message_settings.dingtalk_enabled IS '钉钉通知开关'
 COMMENT ON COLUMN user_message_settings.do_not_disturb IS '免打扰模式';
 ```
 
-### 12. 消息推送记录表 (message_push_logs)
+### 7. 消息推送记录表 (message_push_logs)
 
 ```sql
 CREATE TABLE message_push_logs (
@@ -370,7 +584,7 @@ COMMENT ON COLUMN message_push_logs.channel IS '推送渠道:web/email/dingtalk'
 COMMENT ON COLUMN message_push_logs.status IS '1:成功 0:失败';
 ```
 
-### 触发器：自动更新 updated_at
+### 8. 触发器：自动更新 updated_at
 
 ```sql
 CREATE OR REPLACE FUNCTION update_updated_at_column()
@@ -383,12 +597,6 @@ $$ LANGUAGE plpgsql;
 
 -- 为需要的表创建触发器
 CREATE TRIGGER update_tenants_updated_at BEFORE UPDATE ON tenants
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-
-CREATE TRIGGER update_organizations_updated_at BEFORE UPDATE ON organizations
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-
-CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 CREATE TRIGGER update_message_templates_updated_at BEFORE UPDATE ON message_templates
@@ -650,10 +858,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/admin/messages/:id/cancel", post(handlers::admin_handler::cancel_message))
         .route("/api/admin/messages/:id/retry", post(handlers::admin_handler::retry_message))
         .route("/api/admin/messages/stats", get(handlers::admin_handler::get_stats))
-        
-        // 组织查询路由
-        .route("/api/organizations/tree", get(handlers::message_handler::get_org_tree))
-        .route("/api/organizations/:id/users", get(handlers::message_handler::get_org_users))
         
         // WebSocket 路由
         .route("/ws/:tenant_id", get(websocket::handler::ws_handler))
@@ -971,8 +1175,8 @@ impl MessageService {
 
     pub async fn send_message(
         &self,
-        tenant_id: i64,
-        sender_id: i64,
+        tenant_id: i64,      // 从 JWT 提取
+        sender_id: i64,      // 从 JWT 提取
         request: CreateMessageRequest,
     ) -> AppResult<i64> {
         // 1. 获取模板
@@ -1060,30 +1264,22 @@ impl MessageService {
 use crate::{
     error::{AppError, AppResult},
     models::message::{TargetRule, TargetScope},
-    repositories::{
-        organization_repository::OrganizationRepository,
-        user_repository::UserRepository,
-    },
 };
-use sqlx::PgPool;
 use std::collections::HashSet;
 
-pub struct TargetResolver {
-    user_repo: UserRepository,
-    org_repo: OrganizationRepository,
-}
+/// 目标用户解析器
+///
+/// ⚠️ 用户/组织/角色数据由调用方从外部服务获取并直接传入
+/// 本模块不维护用户/组织表，仅解析 target_rules 中指定的用户ID列表
+pub struct TargetResolver;
 
 impl TargetResolver {
-    pub fn new(db: PgPool, _redis: redis::aio::ConnectionManager) -> Self {
-        Self {
-            user_repo: UserRepository::new(db.clone()),
-            org_repo: OrganizationRepository::new(db),
-        }
+    pub fn new() -> Self {
+        Self
     }
 
     pub async fn resolve_target_users(
         &self,
-        tenant_id: i64,
         rules: Vec<TargetRule>,
     ) -> AppResult<Vec<i64>> {
         let mut all_user_ids = HashSet::new();
@@ -1093,79 +1289,40 @@ impl TargetResolver {
                 .map_err(|e| AppError::BadRequest(e.to_string()))?;
 
             let user_ids = match rule.target_type.as_str() {
-                "user" => self.resolve_user_target(&scope).await?,
-                "org" => self.resolve_org_target(tenant_id, &scope).await?,
-                "role" => self.resolve_role_target(tenant_id, &scope).await?,
-                "custom" => self.resolve_custom_target(tenant_id, &scope).await?,
+                "user" => self.resolve_user_target(&scope),
+                "org" => self.resolve_org_target(&scope),
+                "role" => self.resolve_role_target(&scope),
+                "custom" => self.resolve_custom_target(&scope),
                 _ => vec![],
             };
 
-            // 应用筛选条件
-            let filtered_ids = if let Some(filter) = rule.filter_conditions {
-                self.apply_filters(tenant_id, user_ids, filter).await?
-            } else {
-                user_ids
-            };
-
-            all_user_ids.extend(filtered_ids);
+            all_user_ids.extend(user_ids);
         }
 
         Ok(all_user_ids.into_iter().collect())
     }
 
-    async fn resolve_user_target(&self, scope: &TargetScope) -> AppResult<Vec<i64>> {
-        Ok(scope.user_ids.clone().unwrap_or_default())
+    /// 直接指定用户ID列表
+    fn resolve_user_target(&self, scope: &TargetScope) -> Vec<i64> {
+        scope.user_ids.clone().unwrap_or_default()
     }
 
-    async fn resolve_org_target(
-        &self,
-        tenant_id: i64,
-        scope: &TargetScope,
-    ) -> AppResult<Vec<i64>> {
-        let org_ids = scope.org_ids.clone().unwrap_or_default();
-        let include_children = scope.include_children.unwrap_or(false);
-
-        let mut all_org_ids = org_ids.clone();
-
-        if include_children {
-            for org_id in org_ids {
-                let children = self.org_repo.get_children(tenant_id, org_id).await?;
-                all_org_ids.extend(children);
-            }
-        }
-
-        self.user_repo.get_by_organizations(&all_org_ids).await
+    /// 组织目标：org_ids 由调用方（外部服务）解析完成后传入
+    fn resolve_org_target(&self, scope: &TargetScope) -> Vec<i64> {
+        // 外部服务已根据 org_ids 和 include_children 解析出所有用户
+        scope.user_ids.clone().unwrap_or_default()
     }
 
-    async fn resolve_role_target(
-        &self,
-        tenant_id: i64,
-        scope: &TargetScope,
-    ) -> AppResult<Vec<i64>> {
-        let role_codes = scope.role_codes.clone().unwrap_or_default();
-        self.user_repo.get_by_roles(tenant_id, &role_codes).await
+    /// 角色目标：role_codes 由调用方（外部服务）解析完成后传入
+    fn resolve_role_target(&self, scope: &TargetScope) -> Vec<i64> {
+        // 外部服务已根据 role_codes 解析出所有用户
+        scope.user_ids.clone().unwrap_or_default()
     }
 
-    async fn resolve_custom_target(
-        &self,
-        tenant_id: i64,
-        scope: &TargetScope,
-    ) -> AppResult<Vec<i64>> {
-        if let Some(condition) = &scope.condition {
-            self.user_repo.get_by_custom_condition(tenant_id, condition).await
-        } else {
-            Ok(vec![])
-        }
-    }
-
-    async fn apply_filters(
-        &self,
-        _tenant_id: i64,
-        user_ids: Vec<i64>,
-        _filter: serde_json::Value,
-    ) -> AppResult<Vec<i64>> {
-        // TODO: 实现筛选逻辑
-        Ok(user_ids)
+    /// 自定义条件：由调用方（外部服务）解析完成后传入
+    fn resolve_custom_target(&self, scope: &TargetScope) -> Vec<i64> {
+        // 外部服务已根据自定义条件解析出所有用户
+        scope.user_ids.clone().unwrap_or_default()
     }
 }
 ```
@@ -1176,10 +1333,7 @@ impl TargetResolver {
 use crate::{
     error::AppResult,
     models::message::Message,
-    repositories::{
-        message_repository::MessageRepository,
-        user_repository::UserRepository,
-    },
+    repositories::message_repository::MessageRepository,
     websocket::WebSocketManager,
     cache::redis_client::RedisCache,
 };
@@ -1189,7 +1343,6 @@ use tokio::sync::RwLock;
 
 pub struct PushService {
     message_repo: MessageRepository,
-    user_repo: UserRepository,
     ws_manager: Arc<RwLock<WebSocketManager>>,
     cache: RedisCache,
 }
@@ -1201,8 +1354,7 @@ impl PushService {
         ws_manager: Arc<RwLock<WebSocketManager>>,
     ) -> Self {
         Self {
-            message_repo: MessageRepository::new(db.clone()),
-            user_repo: UserRepository::new(db),
+            message_repo: MessageRepository::new(db),
             ws_manager,
             cache: RedisCache::new(redis),
         }
@@ -1278,10 +1430,8 @@ impl PushService {
         message: &Message,
         user_id: i64,
     ) -> AppResult<()> {
-        // 获取用户消息设置
-        let settings = self.user_repo.get_message_settings(user_id).await?;
-
-        // TODO: 根据设置推送到不同渠道
+        // TODO: 从消息配置或用户配置中获取推送渠道设置
+        // 用户信息从 JWT 传入，如需详细配置需调用外部用户服务 API
         // - 邮件
         // - 钉钉
         // - 企业微信
@@ -1491,7 +1641,7 @@ pub async fn start_consumer(
 
     // 创建服务实例
     let message_repo = MessageRepository::new(db.clone());
-    let target_resolver = TargetResolver::new(db.clone(), redis.clone());
+    let target_resolver = TargetResolver::new();
     let push_service = PushService::new(db, redis, ws_manager);
 
     // 开始消费
@@ -1549,7 +1699,7 @@ async fn process_message(
     let rules = message_repo.get_target_rules(message_id).await?;
 
     // 3. 解析目标用户
-    let user_ids = target_resolver.resolve_target_users(message.tenant_id, rules).await?;
+    let user_ids = target_resolver.resolve_target_users(rules).await?;
 
     tracing::info!("消息 {} 目标用户数: {}", message_id, user_ids.len());
 
@@ -1578,11 +1728,12 @@ use crate::{
 
 pub async fn send_message(
     State(state): State<AppState>,
+    // TODO: 从 JWT Claims 中提取 tenant_id 和 user_id
+    // claims: Claims,  // axum extractor
     Json(request): Json<CreateMessageRequest>,
 ) -> AppResult<Json<serde_json::Value>> {
-    // TODO: 从 JWT 中提取 tenant_id 和 user_id
-    let tenant_id = 1;
-    let user_id = 1;
+    let tenant_id = 1;  // 从 claims.tenant_id 获取
+    let user_id = 1;    // 从 claims.sub 获取
 
     let producer = crate::queue::producer::MessageProducer::new(&state.config)?;
     let service = MessageService::new(state.db, state.redis, producer);
@@ -1597,10 +1748,10 @@ pub async fn send_message(
 
 pub async fn list_user_messages(
     State(state): State<AppState>,
+    // TODO: 从 JWT Claims 提取 user_id
     Query(query): Query<MessageListQuery>,
 ) -> AppResult<Json<PaginatedResponse<UserMessageDetail>>> {
-    // TODO: 从 JWT 中提取 user_id
-    let user_id = 1;
+    let user_id = 1;  // 从 claims.sub 获取
 
     let repo = MessageRepository::new(state.db);
     
@@ -1631,9 +1782,10 @@ pub async fn list_user_messages(
 
 pub async fn mark_as_read(
     State(state): State<AppState>,
+    // TODO: 从 JWT Claims 提取 user_id
     Path(id): Path<i64>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let user_id = 1;
+    let user_id = 1;  // 从 claims.sub 获取
 
     let repo = MessageRepository::new(state.db.clone());
     repo.mark_as_read(id, user_id).await?;
@@ -1651,9 +1803,10 @@ pub async fn mark_as_read(
 
 pub async fn batch_mark_as_read(
     State(state): State<AppState>,
+    // TODO: 从 JWT Claims 提取 user_id
     Json(payload): Json<serde_json::Value>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let user_id = 1;
+    let user_id = 1;  // 从 claims.sub 获取
     
     let message_ids: Vec<i64> = serde_json::from_value(
         payload.get("message_ids").cloned().unwrap_or_default()
@@ -1667,8 +1820,9 @@ pub async fn batch_mark_as_read(
 
 pub async fn get_unread_stats(
     State(state): State<AppState>,
+    // TODO: 从 JWT Claims 提取 user_id
 ) -> AppResult<Json<serde_json::Value>> {
-    let user_id = 1;
+    let user_id = 1;  // 从 claims.sub 获取
 
     let cache = crate::cache::redis_client::RedisCache::new(state.redis);
     let stats = cache.get_unread_stats(user_id).await?;
@@ -2143,6 +2297,7 @@ sqlx migrate revert
 - ✅ 类型安全：编译时 SQL 检查（SQLx）
 - ✅ 多租户隔离：命名空间 + 数据隔离
 - ✅ 实时推送：WebSocket + Redis
+- ✅ 认证解耦：用户信息从 JWT 获取，不维护用户/组织表
 - ✅ 可扩展：消息队列 + 微服务架构
 - ✅ 易维护：清晰的分层架构
 
