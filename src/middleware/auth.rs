@@ -10,6 +10,7 @@ use async_trait::async_trait;
 use crate::{config::Config, error::AppError, utils::jwt::JwtService};
 
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub struct AuthContext {
     pub user_id: i64,
     pub tenant_id: i64,

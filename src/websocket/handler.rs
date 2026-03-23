@@ -68,7 +68,7 @@ async fn handle_socket(socket: WebSocket, tenant_id: i64, state: Arc<AppState>) 
                     handle_client_message(data, tenant_id, user_id, &state_for_handler).await;
                 }
             }
-            Ok(Message::Ping(bytes)) => {
+            Ok(Message::Ping(_bytes)) => {
                 // We can't use sender here since it was moved into the spawned task
                 // Just log the ping for now
                 tracing::debug!("Received ping from user {}", user_id);

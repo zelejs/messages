@@ -234,10 +234,10 @@ pub async fn get_unread_count(
 }
 
 pub async fn get_unread_stats(
-    State(state): State<Arc<AppState>>,
+    State(_state): State<Arc<AppState>>,
     _auth: AuthContext,
 ) -> AppResult<Json<serde_json::Value>> {
-    let user_id = 1;
+    let _user_id = 1;
 
     // TODO: Get from Redis cache
 

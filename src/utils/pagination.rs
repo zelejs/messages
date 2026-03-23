@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
 pub struct PaginationParams {
     #[serde(default = "default_page")]
     pub page: i64,
@@ -9,10 +10,12 @@ pub struct PaginationParams {
     pub page_size: i64,
 }
 
+#[allow(dead_code)]
 fn default_page() -> i64 {
     1
 }
 
+#[allow(dead_code)]
 fn default_page_size() -> i64 {
     20
 }

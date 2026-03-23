@@ -2,10 +2,12 @@ use crate::error::AppResult;
 use redis::AsyncCommands;
 use std::collections::HashMap;
 
+#[allow(dead_code)]
 pub struct RedisCache {
     conn: redis::aio::ConnectionManager,
 }
 
+#[allow(dead_code)]
 impl RedisCache {
     pub fn new(conn: redis::aio::ConnectionManager) -> Self {
         Self { conn }

@@ -116,10 +116,12 @@ impl MessageService {
         Ok(message)
     }
 
+    #[allow(dead_code)]
     pub async fn get_message(&self, id: i64) -> AppResult<Option<Message>> {
         self.repo.get_by_id(id).await
     }
 
+    #[allow(dead_code)]
     pub async fn cancel_message(&self, id: i64) -> AppResult<()> {
         self.repo.cancel_message(id).await
     }

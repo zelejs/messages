@@ -52,6 +52,7 @@ pub struct TargetScope {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[allow(dead_code)]
 pub struct UserMessage {
     pub id: i64,
     pub message_id: i64,
@@ -108,18 +109,21 @@ pub struct MessageListQuery {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct UnreadStats {
     pub total: i64,
     pub by_category: Vec<CategoryCount>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct CategoryCount {
     pub category: String,
     pub count: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct PaginatedResponse<T> {
     pub data: Vec<T>,
     pub total: i64,

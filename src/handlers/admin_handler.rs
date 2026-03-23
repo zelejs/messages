@@ -110,8 +110,8 @@ pub async fn get_message_details(
 }
 
 pub async fn get_push_logs(
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<i64>,
+    State(_state): State<Arc<AppState>>,
+    Path(_id): Path<i64>,
 ) -> AppResult<Json<Vec<PushLogResponse>>> {
     // TODO: Query message_push_logs table
     // For now, return empty vector
@@ -143,8 +143,8 @@ pub async fn cancel_message(
 }
 
 pub async fn retry_message(
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<i64>,
+    State(_state): State<Arc<AppState>>,
+    Path(_id): Path<i64>,
 ) -> AppResult<Json<serde_json::Value>> {
     // TODO: Re-publish message to queue
     Ok(Json(serde_json::json!({ "success": true })))
@@ -166,7 +166,7 @@ pub struct CategoryStats {
 }
 
 pub async fn get_stats(
-    State(state): State<Arc<AppState>>,
+    State(_state): State<Arc<AppState>>,
 ) -> AppResult<Json<MessageStats>> {
     // TODO: Query statistics from database
     Ok(Json(MessageStats {

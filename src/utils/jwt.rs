@@ -10,8 +10,10 @@ pub struct Claims {
 }
 
 pub struct JwtService {
+    #[allow(dead_code)]
     encoding_key: EncodingKey,
     decoding_key: DecodingKey,
+    #[allow(dead_code)]
     expiration: i64,
 }
 
@@ -24,6 +26,7 @@ impl JwtService {
         }
     }
 
+    #[allow(dead_code)]
     pub fn generate(&self, user_id: &str, tenant_id: i64) -> Result<String, String> {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)

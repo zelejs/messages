@@ -59,6 +59,7 @@ impl MessageProducer {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub async fn publish_message_with_delay(
         &self,
         message_id: i64,

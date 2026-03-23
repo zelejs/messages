@@ -8,6 +8,7 @@ use sqlx::PgPool;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+#[allow(dead_code)]
 pub struct PushService {
     message_repo: MessageRepository,
     user_repo: UserRepository,
@@ -15,6 +16,7 @@ pub struct PushService {
 }
 
 impl PushService {
+    #[allow(dead_code)]
     pub fn new(
         db: PgPool,
         _redis: redis::aio::ConnectionManager,
@@ -27,6 +29,7 @@ impl PushService {
         }
     }
 
+    #[allow(dead_code)]
     pub async fn push_to_users(
         &self,
         message: &Message,
@@ -71,6 +74,7 @@ impl PushService {
         Ok(())
     }
 
+    #[allow(dead_code)]
     async fn push_via_websocket(&self, message: &Message, user_id: i64) -> AppResult<()> {
         let payload = serde_json::json!({
             "type": "new_message",
@@ -89,6 +93,7 @@ impl PushService {
         Ok(())
     }
 
+    #[allow(dead_code)]
     async fn push_offline_channels(&self, message: &Message, user_id: i64) -> AppResult<()> {
         // Get user message settings
         let settings = self.user_repo.get_message_settings(user_id).await?;

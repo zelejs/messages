@@ -16,7 +16,7 @@ pub async fn start_consumer(
     config: Config,
     db: sqlx::PgPool,
     redis: redis::aio::ConnectionManager,
-    ws_manager: Arc<RwLock<WebSocketManager>>,
+    _ws_manager: Arc<RwLock<WebSocketManager>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Connect to RabbitMQ
     let conn = Connection::connect(&config.rabbitmq_url, ConnectionProperties::default()).await?;
