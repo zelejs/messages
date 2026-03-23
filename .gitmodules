@@ -1,0 +1,2 @@
+[submodule "messages"]
+	url = git@github.com:zelejs/messages.git
