@@ -24,7 +24,12 @@ pub async fn send_message(
     let user_id = auth.user_id;
 
     let producer = MessageProducer::new(&state.config).await?;
-    let service = MessageService::new(state.db.clone(), state.redis.clone(), state.ws_manager.clone());
+    let service = MessageService::new(
+        state.db.clone(),
+        state.redis.clone(),
+        state.ws_manager.clone(),
+        state.config.channel_config.clone(),
+    );
 
     let message_id = service
         .send_message(tenant_id, user_id, request)

@@ -1,4 +1,5 @@
 use crate::{
+    config::ChannelConfig,
     error::{AppError, AppResult},
     models::message::{CreateMessageRequest, Message},
     repositories::message_repository::MessageRepository,
@@ -10,6 +11,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
+#[derive(Clone)]
 pub struct MessageService {
     db: PgPool,
     redis: redis::aio::ConnectionManager,
@@ -17,6 +19,7 @@ pub struct MessageService {
     template_service: TemplateService,
     target_resolver: TargetResolver,
     ws_manager: Arc<RwLock<WebSocketManager>>,
+    channel_config: ChannelConfig,
 }
 
 impl MessageService {
@@ -24,6 +27,7 @@ impl MessageService {
         db: PgPool,
         redis: redis::aio::ConnectionManager,
         ws_manager: Arc<RwLock<WebSocketManager>>,
+        channel_config: ChannelConfig,
     ) -> Self {
         Self {
             db: db.clone(),
@@ -32,6 +36,7 @@ impl MessageService {
             template_service: TemplateService::new(db.clone()),
             target_resolver: TargetResolver::new(db, redis),
             ws_manager,
+            channel_config,
         }
     }
 
@@ -123,6 +128,7 @@ impl MessageService {
             self.db.clone(),
             self.redis.clone(),
             self.ws_manager.clone(),
+            self.channel_config.clone(),
         );
         push_service.push_to_users(&message, user_ids.clone()).await?;
 
@@ -142,6 +148,16 @@ impl MessageService {
     #[allow(dead_code)]
     pub async fn cancel_message(&self, id: i64) -> AppResult<()> {
         self.repo.cancel_message(id).await
+    }
+
+    /// 记录消息处理失败日志
+    pub async fn log_message_failed(&self, message_id: i64, error_msg: &str) -> AppResult<()> {
+        tracing::error!("Message {} failed: {}", message_id, error_msg);
+        // 更新消息状态为失败 (status = 3)
+        self.repo
+            .update_status(message_id, 3, Some(chrono::Utc::now()))
+            .await?;
+        Ok(())
     }
 
     fn render_template(
