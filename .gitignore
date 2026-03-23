@@ -1,0 +1,50 @@
+# Rust build artifacts
+/target/
+**/*.rs.bk
+*.pdb
+
+# Cargo lock file (optional - uncomment if not committing)
+# Cargo.lock
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment files (keep .env.example as template)
+.env
+.env.local
+.env.*.local
+
+# Log files
+*.log
+logs/
+
+# Test outputs
+/tests/output/
+/tests/*.log
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# OS-specific
+Thumbs.db
+.DS_Store
+
+# Coverage reports
+tarpaulin-report.html
+cobertura.xml
+
+# Database backups
+*.sql.backup
+*.bak
+
+# SSL/TLS certificates (if generated locally)
+*.pem
+*.key
+*.crt

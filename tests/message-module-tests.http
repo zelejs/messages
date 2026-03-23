@@ -1,0 +1,673 @@
+### ============================================================
+### Module: Message Module API Tests
+### Description: Multi-tenant SaaS message system API test suite
+### ============================================================
+###
+### Parameter Description
+### ---------------------------------------------------------
+### baseUrl       : API base URL (default: http://localhost:3000)
+### API base path : /api (fixed, DO NOT use variable substitution)
+### Content-Type  : application/json
+###
+### Authentication
+### Testers must manually set JWT token locally:
+### # @accessToken = <paste-your-jwt-token-here>
+###
+### Pagination parameters     : page (>=1), page_size (max 100)
+### Message status codes      : 0=draft, 1=pending, 2=sent, 3=failed, 4=cancelled
+### Priority levels           : 1=low, 2=normal, 3=high, 4=urgent
+### Send type codes           : 1=immediate, 2=scheduled, 3=broadcast
+### Channel types             : web, email, dingtalk, sms
+### Date format               : YYYY-MM-DD or ISO 8601 for datetime
+### ============================================================
+
+@baseUrl = http://localhost:3000/api
+@contentType = application/json
+
+### ===========================================
+### 1. Message Template CRUD Operations
+### ===========================================
+
+### MSG_TC_001_01 - Create message template (success)
+# Description: Create a new message template with all fields
+# Constraints: template_code must be unique, category required
+# Priority: 1=low, 2=normal, 3=high, 4=urgent
+POST {{baseUrl}}/message/templates
+Content-Type: {{contentType}}
+# Authorization: Bearer <PASTE_YOUR_JWT_TOKEN>
+
+{
+  "template_code": "welcome_notice",
+  "template_name": "Welcome Notice",
+  "category": "system",
+  "priority": 2,
+  "title_template": "Welcome to {{platform_name}}",
+  "content_template": "Dear {{user_name}}, welcome to {{platform_name}}!",
+  "jump_type": "url",
+  "jump_params": {
+    "url": "https://example.com/welcome"
+  },
+  "channels": ["web", "email"]
+}
+
+###
+
+### MSG_TC_001_02 - Create template with minimal fields (success)
+# Description: Create template with only required fields
+# Constraints: template_code, template_name, category are required
+POST {{baseUrl}}/message/templates
+Content-Type: {{contentType}}
+# Authorization: Bearer <PASTE_YOUR_JWT_TOKEN>
+
+{
+  "template_code": "simple_notice",
+  "template_name": "Simple Notice",
+  "category": "announcement"
+}
+
+###
+
+### MSG_TC_001_03 - List all templates (paginated)
+# Description: Get paginated list of templates
+# Constraints: page >= 1, page_size max 100
+GET {{baseUrl}}/message/templates?page=1&page_size=20
+
+###
+
+### MSG_TC_001_04 - List templates filtered by category
+# Description: Filter templates by category
+# Constraints: category can be: system, announcement, notification, alert
+GET {{baseUrl}}/message/templates?category=system&page=1&page_size=20
+
+###
+
+### MSG_TC_001_05 - Get template by code (success)
+# Description: Retrieve specific template using template_code
+# Constraints: template_code must exist
+GET {{baseUrl}}/message/templates/welcome_notice
+
+###
+
+### MSG_TC_001_06 - Get template by ID (success)
+# Description: Retrieve specific template using numeric ID
+# Constraints: ID must exist
+# @templateId = 1
+GET {{baseUrl}}/message/templates/{{templateId}}
+
+###
+
+### MSG_TC_001_07 - Update template (partial fields)
+# Description: Update specific fields of a template
+# Constraints: template_code cannot be updated, partial update allowed
+# @templateId = 1
+PUT {{baseUrl}}/message/templates/{{templateId}}
+Content-Type: {{contentType}}
+# Authorization: Bearer <PASTE_YOUR_JWT_TOKEN>
+
+{
+  "template_name": "Updated Welcome Notice",
+  "priority": 3
+}
+
+###
+
+### MSG_TC_001_08 - Delete template (success)
+# Description: Soft delete a template
+# Constraints: System templates (is_system=1) cannot be deleted
+# @templateId = 2
+DELETE {{baseUrl}}/message/templates/{{templateId}}
+# Authorization: Bearer <PASTE_YOUR_JWT_TOKEN>
+
+###
+
+### ===========================================
+### 2. Message Sending Operations
+### ===========================================
+
+### MSG_TC_002_01 - Send immediate message (success)
+# Description: Send message immediately using template
+# Constraints: template_code must exist, target_rules required
+# Variables in template must be provided in variables object
+POST {{baseUrl}}/message/send
+Content-Type: {{contentType}}
+# Authorization: Bearer <PASTE_YOUR_JWT_TOKEN>
+
+{
+  "template_code": "welcome_notice",
+  "target_rules": [
+    {
+      "target_type": "users",
+      "target_scope": {
+        "user_ids": [1, 2, 3]
+      }
+    }
+  ],
+  "variables": {
+    "platform_name": "EduPlatform",
+    "user_name": "John Doe"
+  },
+  "send_type": 1
+}
+
+###
+
+### MSG_TC_002_02 - Send scheduled message (success)
+# Description: Schedule message for future delivery
+# Constraints: scheduled_at must be future timestamp in ISO 8601 format
+POST {{baseUrl}}/message/send
+Content-Type: {{contentType}}
+# Authorization: Bearer <PASTE_YOUR_JWT_TOKEN>
+
+{
+  "template_code": "exam_reminder",
+  "target_rules": [
+    {
+      "target_type": "organization",
+      "target_scope": {
+        "org_ids": [5],
+        "include_children": true
+      }
+    }
+  ],
+  "variables": {
+    "exam_date": "2026-04-01"
+  },
+  "send_type": 2,
+  "scheduled_at": "2026-03-25T10:00:00Z"
+}
+
+###
+
+### MSG_TC_002_03 - Send broadcast message (success)
+# Description: Send message to all users in tenant
+# Constraints: Requires admin role, send_type=3 for broadcast
+POST {{baseUrl}}/message/send
+Content-Type: {{contentType}}
+# Authorization: Bearer <PASTE_YOUR_ADMIN_JWT_TOKEN>
+
+{
+  "template_code": "system_maintenance",
+  "target_rules": [
+    {
+      "target_type": "all"
+    }
+  ],
+  "variables": {
+    "maintenance_window": "2026-03-25 02:00-04:00 UTC"
+  },
+  "send_type": 3
+}
+
+###
+
+### MSG_TC_002_04 - Send message with role filter (success)
+# Description: Send message to users with specific roles
+# Constraints: role_codes must exist in roles table
+POST {{baseUrl}}/message/send
+Content-Type: {{contentType}}
+# Authorization: Bearer <PASTE_YOUR_JWT_TOKEN>
+
+{
+  "template_code": "teacher_notification",
+  "target_rules": [
+    {
+      "target_type": "roles",
+      "target_scope": {
+        "role_codes": ["teacher", "admin"]
+      }
+    }
+  ],
+  "variables": {
+    "meeting_time": "2026-03-26 14:00"
+  },
+  "send_type": 1
+}
+
+###
+
+### ===========================================
+### 3. User Message Operations
+### ===========================================
+
+### MSG_TC_003_01 - List user messages (all)
+# Description: Get paginated list of current user's messages
+# Constraints: Requires authentication, returns messages for current user only
+GET {{baseUrl}}/message/list?page=1&page_size=20
+# Authorization: Bearer <PASTE_YOUR_JWT_TOKEN>
+
+###
+
+### MSG_TC_003_02 - List user messages (filtered by category)
+# Description: Filter messages by category
+# Constraints: category values: system, announcement, notification, alert
+GET {{baseUrl}}/message/list?category=announcement&page=1&page_size=20
+# Authorization: Bearer <PASTE_YOUR_JWT_TOKEN>
+
+###
+
+### MSG_TC_003_03 - List unread messages only
+# Description: Get only unread messages
+# Constraints: is_read=0 for unread, is_read=1 for read
+GET {{baseUrl}}/message/list?is_read=0&page=1&page_size=20
+# Authorization: Bearer <PASTE_YOUR_JWT_TOKEN>
+
+###
+
+### MSG_TC_003_04 - List high priority messages
+# Description: Filter messages by priority level
+# Constraints: priority: 1=low, 2=normal, 3=high, 4=urgent
+GET {{baseUrl}}/message/list?priority=3&page=1&page_size=20
+# Authorization: Bearer <PASTE_YOUR_JWT_TOKEN>
+
+###
+
+### MSG_TC_003_05 - Get message detail (success)
+# Description: Retrieve full details of a specific message
+# Constraints: User can only access their own messages
+# @messageId = 1
+GET {{baseUrl}}/message/{{messageId}}
+# Authorization: Bearer <PASTE_YOUR_JWT_TOKEN>
+
+###
+
+### MSG_TC_003_06 - Mark single message as read
+# Description: Mark a specific message as read
+# Constraints: User can only mark their own messages
+# @messageId = 1
+POST {{baseUrl}}/message/{{messageId}}/read
+# Authorization: Bearer <PASTE_YOUR_JWT_TOKEN>
+
+###
+
+### MSG_TC_003_07 - Batch mark messages as read
+# Description: Mark multiple messages as read in one request
+# Constraints: message_ids array required, max 100 IDs per request
+POST {{baseUrl}}/message/batch-read
+Content-Type: {{contentType}}
+# Authorization: Bearer <PASTE_YOUR_JWT_TOKEN>
+
+{
+  "message_ids": [1, 2, 3, 4, 5]
+}
+
+###
+
+### MSG_TC_003_08 - Mark all messages as read
+# Description: Mark all messages for current user as read
+# Constraints: Requires authentication, affects all user's messages
+POST {{baseUrl}}/message/read-all
+# Authorization: Bearer <PASTE_YOUR_JWT_TOKEN>
+
+###
+
+### MSG_TC_003_09 - Mark category messages as read
+# Description: Mark all messages in a category as read
+# Constraints: category parameter required
+POST {{baseUrl}}/message/read-by-category
+Content-Type: {{contentType}}
+# Authorization: Bearer <PASTE_YOUR_JWT_TOKEN>
+
+{
+  "category": "announcement"
+}
+
+###
+
+### MSG_TC_003_10 - Delete single message (soft delete)
+# Description: Soft delete a specific message
+# Constraints: User can only delete their own messages
+# @messageId = 1
+DELETE {{baseUrl}}/message/{{messageId}}
+# Authorization: Bearer <PASTE_YOUR_JWT_TOKEN>
+
+###
+
+### MSG_TC_003_11 - Batch delete messages
+# Description: Soft delete multiple messages in one request
+# Constraints: message_ids array required, max 100 IDs per request
+POST {{baseUrl}}/message/batch-delete
+Content-Type: {{contentType}}
+# Authorization: Bearer <PASTE_YOUR_JWT_TOKEN>
+
+{
+  "message_ids": [6, 7, 8]
+}
+
+###
+
+### MSG_TC_003_12 - Pin message (success)
+# Description: Pin a message to top of list
+# Constraints: User can only pin their own messages
+# @messageId = 1
+POST {{baseUrl}}/message/{{messageId}}/pin
+# Authorization: Bearer <PASTE_YOUR_JWT_TOKEN>
+
+###
+
+### MSG_TC_003_13 - Unpin message (success)
+# Description: Remove pin from a message
+# Constraints: User can only unpin their own messages
+# @messageId = 1
+DELETE {{baseUrl}}/message/{{messageId}}/pin
+# Authorization: Bearer <PASTE_YOUR_JWT_TOKEN>
+
+###
+
+### ===========================================
+### 4. Message Statistics Operations
+### ===========================================
+
+### MSG_TC_004_01 - Get unread count
+# Description: Get total count of unread messages for current user
+# Constraints: Returns count from cache (Redis) or database
+GET {{baseUrl}}/message/unread-count
+# Authorization: Bearer <PASTE_YOUR_JWT_TOKEN>
+
+###
+
+### MSG_TC_004_02 - Get unread statistics by category
+# Description: Get detailed unread statistics grouped by category
+# Constraints: Returns total count and breakdown by category
+GET {{baseUrl}}/message/unread-stats
+# Authorization: Bearer <PASTE_YOUR_JWT_TOKEN>
+
+###
+
+### ===========================================
+### 5. Message Settings Operations
+### ===========================================
+
+### MSG_TC_005_01 - Get user message settings
+# Description: Retrieve notification preferences for current user
+# Constraints: Returns settings for all channels and categories
+GET {{baseUrl}}/message/settings
+# Authorization: Bearer <PASTE_YOUR_JWT_TOKEN>
+
+###
+
+### MSG_TC_005_02 - Update message settings (partial)
+# Description: Update specific notification preferences
+# Constraints: Partial update allowed, only specified fields updated
+PUT {{baseUrl}}/message/settings
+Content-Type: {{contentType}}
+# Authorization: Bearer <PASTE_YOUR_JWT_TOKEN>
+
+{
+  "category": "announcement",
+  "web_enabled": true,
+  "email_enabled": false,
+  "dingtalk_enabled": false
+}
+
+###
+
+### MSG_TC_005_03 - Enable Do Not Disturb mode
+# Description: Enable DND mode with time range
+# Constraints: Time format HH:MM:SS, start_time < end_time
+PUT {{baseUrl}}/message/settings/dnd
+Content-Type: {{contentType}}
+# Authorization: Bearer <PASTE_YOUR_JWT_TOKEN>
+
+{
+  "enabled": true,
+  "start_time": "22:00:00",
+  "end_time": "08:00:00"
+}
+
+###
+
+### MSG_TC_005_04 - Disable Do Not Disturb mode
+# Description: Disable DND mode
+# Constraints: No time parameters required when disabling
+PUT {{baseUrl}}/message/settings/dnd
+Content-Type: {{contentType}}
+# Authorization: Bearer <PASTE_YOUR_JWT_TOKEN>
+
+{
+  "enabled": false
+}
+
+###
+
+### MSG_TC_005_05 - Update channel preferences
+# Description: Update which channels are enabled for notifications
+# Constraints: Updates only channel settings, preserves other preferences
+PUT {{baseUrl}}/message/settings/channels
+Content-Type: {{contentType}}
+# Authorization: Bearer <PASTE_YOUR_JWT_TOKEN>
+
+{
+  "category": "notification",
+  "web_enabled": true,
+  "email_enabled": true,
+  "dingtalk_enabled": false
+}
+
+###
+
+### ===========================================
+### 6. Organization and Targeting Operations
+### ===========================================
+
+### MSG_TC_006_01 - Get organization tree
+# Description: Get hierarchical tree of organizations for current tenant
+# Constraints: Returns only organizations user has access to
+GET {{baseUrl}}/message/org-tree
+# Authorization: Bearer <PASTE_YOUR_JWT_TOKEN>
+
+###
+
+### MSG_TC_006_02 - Get users in organization
+# Description: Get list of user IDs in a specific organization
+# Constraints: org_id must exist and be accessible to user
+# @orgId = 5
+GET {{baseUrl}}/message/org-users/{{orgId}}
+# Authorization: Bearer <PASTE_YOUR_JWT_TOKEN>
+
+###
+
+### ===========================================
+### 7. Admin Operations
+### ===========================================
+
+### MSG_TC_007_01 - List all messages (admin)
+# Description: Admin view of all messages across all users
+# Constraints: Requires admin role, shows all tenant messages
+GET {{baseUrl}}/adm/message/list?page=1&page_size=50
+# Authorization: Bearer <PASTE_YOUR_ADMIN_JWT_TOKEN>
+
+###
+
+### MSG_TC_007_02 - Get message details with recipients (admin)
+# Description: Get full message details including delivery status
+# Constraints: Requires admin role, shows recipient information
+# @messageId = 1
+GET {{baseUrl}}/adm/message/{{messageId}}/details
+# Authorization: Bearer <PASTE_YOUR_ADMIN_JWT_TOKEN>
+
+###
+
+### MSG_TC_007_03 - Cancel scheduled message (admin)
+# Description: Cancel a scheduled message before it's sent
+# Constraints: Requires admin role, only pending messages can be cancelled
+# @messageId = 10
+POST {{baseUrl}}/adm/message/{{messageId}}/cancel
+# Authorization: Bearer <PASTE_YOUR_ADMIN_JWT_TOKEN>
+
+###
+
+### MSG_TC_007_04 - Get message statistics (admin)
+# Description: Get overall message statistics for tenant
+# Constraints: Requires admin role, returns aggregated stats
+GET {{baseUrl}}/adm/message/stats
+# Authorization: Bearer <PASTE_YOUR_ADMIN_JWT_TOKEN>
+
+###
+
+### ===========================================
+### 8. Error Scenarios
+### ===========================================
+
+### MSG_TC_ERR_01 - Template not found (404)
+# Expected: 404 Not Found
+GET {{baseUrl}}/message/templates/nonexistent_code
+
+###
+
+### MSG_TC_ERR_02 - Create template with duplicate code (409)
+# Expected: 409 Conflict - template_code must be unique
+POST {{baseUrl}}/message/templates
+Content-Type: {{contentType}}
+
+{
+  "template_code": "welcome_notice",
+  "template_name": "Duplicate Template",
+  "category": "system"
+}
+
+###
+
+### MSG_TC_ERR_03 - Create template with missing required field (400)
+# Expected: 400 Bad Request - category is required
+POST {{baseUrl}}/message/templates
+Content-Type: {{contentType}}
+
+{
+  "template_code": "invalid_template",
+  "template_name": "Invalid Template"
+}
+
+###
+
+### MSG_TC_ERR_04 - Send message with nonexistent template (404)
+# Expected: 404 Not Found - template_code must exist
+POST {{baseUrl}}/message/send
+Content-Type: {{contentType}}
+
+{
+  "template_code": "nonexistent_template",
+  "target_rules": [
+    {
+      "target_type": "users",
+      "target_scope": {
+        "user_ids": [1]
+      }
+    }
+  ],
+  "variables": {}
+}
+
+###
+
+### MSG_TC_ERR_05 - Send message with missing target_rules (400)
+# Expected: 400 Bad Request - target_rules is required
+POST {{baseUrl}}/message/send
+Content-Type: {{contentType}}
+
+{
+  "template_code": "welcome_notice",
+  "variables": {}
+}
+
+###
+
+### MSG_TC_ERR_06 - Get message not owned by user (403/404)
+# Expected: 403 Forbidden or 404 Not Found
+GET {{baseUrl}}/message/999999
+# Authorization: Bearer <PASTE_YOUR_JWT_TOKEN>
+
+###
+
+### MSG_TC_ERR_07 - Mark non-existent message as read (404)
+# Expected: 404 Not Found
+POST {{baseUrl}}/message/999999/read
+# Authorization: Bearer <PASTE_YOUR_JWT_TOKEN>
+
+###
+
+### MSG_TC_ERR_08 - Batch mark with empty array (400)
+# Expected: 400 Bad Request - message_ids cannot be empty
+POST {{baseUrl}}/message/batch-read
+Content-Type: {{contentType}}
+
+{
+  "message_ids": []
+}
+
+###
+
+### MSG_TC_ERR_09 - Update DND with invalid time format (400)
+# Expected: 400 Bad Request - time must be HH:MM:SS format
+PUT {{baseUrl}}/message/settings/dnd
+Content-Type: {{contentType}}
+
+{
+  "enabled": true,
+  "start_time": "invalid",
+  "end_time": "08:00:00"
+}
+
+###
+
+### MSG_TC_ERR_10 - Unauthorized access (401)
+# Expected: 401 Unauthorized - missing or invalid token
+GET {{baseUrl}}/message/list
+# Authorization: Bearer invalid_token
+
+###
+
+### MSG_TC_ERR_11 - Delete system template (403)
+# Expected: 403 Forbidden - system templates cannot be deleted
+# @systemTemplateId = 1
+DELETE {{baseUrl}}/message/templates/{{systemTemplateId}}
+# Authorization: Bearer <PASTE_YOUR_JWT_TOKEN>
+
+###
+
+### MSG_TC_ERR_12 - Scheduled message in past (400)
+# Expected: 400 Bad Request - scheduled_at must be future
+POST {{baseUrl}}/message/send
+Content-Type: {{contentType}}
+
+{
+  "template_code": "welcome_notice",
+  "target_rules": [
+    {
+      "target_type": "users",
+      "target_scope": {
+        "user_ids": [1]
+      }
+    }
+  ],
+  "variables": {},
+  "send_type": 2,
+  "scheduled_at": "2020-01-01T00:00:00Z"
+}
+
+###
+
+### MSG_TC_ERR_13 - Invalid priority value (400)
+# Expected: 400 Bad Request - priority must be 1-4
+POST {{baseUrl}}/message/templates
+Content-Type: {{contentType}}
+
+{
+  "template_code": "invalid_priority",
+  "template_name": "Invalid Priority",
+  "category": "system",
+  "priority": 10
+}
+
+###
+
+### MSG_TC_ERR_14 - Page number below 1 (400)
+# Expected: 400 Bad Request - page must be >= 1
+GET {{baseUrl}}/message/list?page=0&page_size=20
+
+###
+
+### MSG_TC_ERR_15 - Page size exceeds maximum (400)
+# Expected: 400 Bad Request - page_size max is 100
+GET {{baseUrl}}/message/list?page=1&page_size=1000
+
+###

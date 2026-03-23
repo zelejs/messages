@@ -1,0 +1,179 @@
+use axum::{
+    extract::{Path, Query, State},
+    Json,
+};
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+
+use crate::{
+    error::AppResult,
+    models::message::Message,
+    repositories::message_repository::MessageRepository,
+    utils::pagination::PaginatedResponse,
+    AppState,
+};
+
+#[derive(Debug, Deserialize)]
+pub struct AdminMessageQuery {
+    pub page: Option<i64>,
+    pub page_size: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct MessageDetailResponse {
+    pub id: i64,
+    pub tenant_id: i64,
+    pub message_code: String,
+    pub template_id: Option<i64>,
+    pub category: String,
+    pub priority: i16,
+    pub title: String,
+    pub content: Option<String>,
+    pub jump_type: Option<String>,
+    pub jump_params: Option<serde_json::Value>,
+    pub send_type: i16,
+    pub scheduled_at: Option<String>,
+    pub sent_at: Option<String>,
+    pub sender_id: Option<i64>,
+    pub sender_type: String,
+    pub status: i16,
+    pub created_at: String,
+    pub updated_at: String,
+    pub target_users_count: i64,
+    pub read_count: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PushLogResponse {
+    pub id: i64,
+    pub message_id: i64,
+    pub user_id: i64,
+    pub channel: String,
+    pub status: i16,
+    pub error_msg: Option<String>,
+    pub pushed_at: String,
+}
+
+pub async fn list_all_messages(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<AdminMessageQuery>,
+) -> AppResult<Json<PaginatedResponse<Message>>> {
+    // TODO: Extract tenant_id from AuthContext
+    let tenant_id = 1;
+
+    let repo = MessageRepository::new(state.db.clone());
+
+    let page = query.page.unwrap_or(1);
+    let page_size = query.page_size.unwrap_or(20);
+
+    let messages = repo.list_messages(tenant_id, page, page_size).await?;
+
+    let total = repo.count_messages(tenant_id).await?;
+
+    Ok(Json(PaginatedResponse::new(messages, total, page, page_size)))
+}
+
+pub async fn get_message_details(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<i64>,
+) -> AppResult<Json<MessageDetailResponse>> {
+    let repo = MessageRepository::new(state.db.clone());
+
+    let message = repo.get_by_id(id).await?.ok_or(crate::error::AppError::NotFound)?;
+
+    // TODO: Get target users count and read count
+    let target_users_count = 0;
+    let read_count = 0;
+
+    Ok(Json(MessageDetailResponse {
+        id: message.id,
+        tenant_id: message.tenant_id,
+        message_code: message.message_code,
+        template_id: message.template_id,
+        category: message.category,
+        priority: message.priority,
+        title: message.title,
+        content: message.content,
+        jump_type: message.jump_type,
+        jump_params: message.jump_params,
+        send_type: message.send_type,
+        scheduled_at: message.scheduled_at.map(|t| t.to_rfc3339()),
+        sent_at: message.sent_at.map(|t| t.to_rfc3339()),
+        sender_id: message.sender_id,
+        sender_type: message.sender_type,
+        status: message.status,
+        created_at: message.created_at.to_rfc3339(),
+        updated_at: message.updated_at.to_rfc3339(),
+        target_users_count,
+        read_count,
+    }))
+}
+
+pub async fn get_push_logs(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<i64>,
+) -> AppResult<Json<Vec<PushLogResponse>>> {
+    // TODO: Query message_push_logs table
+    // For now, return empty vector
+    Ok(Json(vec![]))
+}
+
+pub async fn revoke_message(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<i64>,
+) -> AppResult<Json<serde_json::Value>> {
+    let repo = MessageRepository::new(state.db.clone());
+
+    // Mark message as cancelled
+    repo.cancel_message(id).await?;
+
+    Ok(Json(serde_json::json!({ "success": true })))
+}
+
+pub async fn cancel_message(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<i64>,
+) -> AppResult<Json<serde_json::Value>> {
+    let repo = MessageRepository::new(state.db.clone());
+
+    // Cancel scheduled message
+    repo.cancel_message(id).await?;
+
+    Ok(Json(serde_json::json!({ "success": true })))
+}
+
+pub async fn retry_message(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<i64>,
+) -> AppResult<Json<serde_json::Value>> {
+    // TODO: Re-publish message to queue
+    Ok(Json(serde_json::json!({ "success": true })))
+}
+
+#[derive(Debug, Serialize)]
+pub struct MessageStats {
+    pub total_messages: i64,
+    pub sent_today: i64,
+    pub pending: i64,
+    pub failed: i64,
+    pub by_category: Vec<CategoryStats>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CategoryStats {
+    pub category: String,
+    pub count: i64,
+}
+
+pub async fn get_stats(
+    State(state): State<Arc<AppState>>,
+) -> AppResult<Json<MessageStats>> {
+    // TODO: Query statistics from database
+    Ok(Json(MessageStats {
+        total_messages: 0,
+        sent_today: 0,
+        pending: 0,
+        failed: 0,
+        by_category: vec![],
+    }))
+}
