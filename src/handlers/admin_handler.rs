@@ -7,8 +7,9 @@ use std::sync::Arc;
 
 use crate::{
     error::AppResult,
-    models::message::Message,
-    repositories::message_repository::MessageRepository,
+    models::{message::Message, retry::DLQQuery},
+    repositories::{message_repository::MessageRepository, retry_repository::RetryRepository},
+    services::retry_service::{DLQService, DLQStats},
     utils::pagination::PaginatedResponse,
     AppState,
 };
@@ -176,4 +177,144 @@ pub async fn get_stats(
         failed: 0,
         by_category: vec![],
     }))
+}
+
+// ==================== Dead Letter Queue (DLQ) Admin APIs ====================
+
+#[derive(Debug, Deserialize)]
+pub struct DLQListQuery {
+    pub status: Option<i16>,
+    pub page: Option<i64>,
+    pub page_size: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DeadLetterResponse {
+    pub id: i64,
+    pub message_id: i64,
+    pub user_id: i64,
+    pub channel: String,
+    pub failed_reason: Option<String>,
+    pub retry_history: Option<serde_json::Value>,
+    pub status: i16,
+    pub retried_at: Option<String>,
+    pub retried_success: i16,
+    pub created_at: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DLQListResponse {
+    pub data: Vec<DeadLetterResponse>,
+    pub total: i64,
+    pub page: i64,
+    pub page_size: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DLQStatsResponse {
+    pub pending: i64,
+    pub retried: i64,
+    pub abandoned: i64,
+    pub total: i64,
+}
+
+/// List dead letter messages
+pub async fn list_dead_letters(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<DLQListQuery>,
+) -> AppResult<Json<DLQListResponse>> {
+    let dlq_service = DLQService::new(RetryRepository::new(state.db.clone()));
+
+    let dlq_query = DLQQuery {
+        status: query.status,
+        page: query.page.unwrap_or(1),
+        page_size: query.page_size.unwrap_or(20),
+    };
+
+    let (dead_letters, total) = dlq_service.list_dead_letters(&dlq_query).await?;
+
+    let data: Vec<DeadLetterResponse> = dead_letters
+        .into_iter()
+        .map(|dl| DeadLetterResponse {
+            id: dl.id,
+            message_id: dl.message_id,
+            user_id: dl.user_id,
+            channel: dl.channel,
+            failed_reason: dl.failed_reason,
+            retry_history: dl.retry_history,
+            status: dl.status,
+            retried_at: dl.retried_at.map(|t| t.to_rfc3339()),
+            retried_success: dl.retried_success,
+            created_at: dl.created_at.to_rfc3339(),
+        })
+        .collect();
+
+    Ok(Json(DLQListResponse {
+        data,
+        total,
+        page: dlq_query.page,
+        page_size: dlq_query.page_size,
+    }))
+}
+
+/// Get DLQ statistics
+pub async fn get_dlq_stats(
+    State(state): State<Arc<AppState>>,
+) -> AppResult<Json<DLQStatsResponse>> {
+    let dlq_service = DLQService::new(RetryRepository::new(state.db.clone()));
+    let stats: DLQStats = dlq_service.get_stats().await?;
+
+    Ok(Json(DLQStatsResponse {
+        pending: stats.pending,
+        retried: stats.retried,
+        abandoned: stats.abandoned,
+        total: stats.total,
+    }))
+}
+
+/// Retry a dead letter message
+pub async fn retry_dead_letter(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<i64>,
+) -> AppResult<Json<serde_json::Value>> {
+    let dlq_service = DLQService::new(RetryRepository::new(state.db.clone()));
+
+    // TODO: Actually retry the message through the original channel
+    // For now, just mark it as retried
+    dlq_service.retry_dead_letter(id, true).await?;
+
+    Ok(Json(serde_json::json!({
+        "success": true,
+        "message": "Dead letter marked for retry"
+    })))
+}
+
+/// Abandon a dead letter message
+pub async fn abandon_dead_letter(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<i64>,
+) -> AppResult<Json<serde_json::Value>> {
+    let dlq_service = DLQService::new(RetryRepository::new(state.db.clone()));
+
+    dlq_service.abandon_dead_letter(id).await?;
+
+    Ok(Json(serde_json::json!({
+        "success": true,
+        "message": "Dead letter abandoned"
+    })))
+}
+
+/// Delete a dead letter message
+pub async fn delete_dead_letter(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<i64>,
+) -> AppResult<Json<serde_json::Value>> {
+    let dlq_service = DLQService::new(RetryRepository::new(state.db.clone()));
+
+    dlq_service.delete_dead_letter(id).await?;
+
+    Ok(Json(serde_json::json!({
+        "success": true,
+        "message": "Dead letter deleted"
+    })))
 }

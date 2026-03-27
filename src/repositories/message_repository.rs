@@ -125,7 +125,7 @@ impl MessageRepository {
         for user_id in user_ids {
             sqlx::query(
                 r#"
-                INSERT INTO t_sys_user_messages (message_id, user_id, tenant_id)
+                INSERT INTO t_sys_message_users (message_id, user_id, tenant_id)
                 SELECT $1, $2, tenant_id FROM t_sys_messages WHERE id = $1
                 ON CONFLICT (message_id, user_id) DO NOTHING
                 "#
@@ -172,16 +172,16 @@ impl MessageRepository {
                 m.status,
                 m.created_at,
                 m.updated_at,
-                um.is_read,
-                um.read_at,
-                um.is_pinned
-            FROM t_sys_user_messages um
-            JOIN t_sys_messages m ON um.message_id = m.id
-            WHERE um.user_id = $1
-              AND um.is_deleted = 0
+                mu.is_read,
+                mu.read_at,
+                mu.is_pinned
+            FROM t_sys_message_users mu
+            JOIN t_sys_messages m ON mu.message_id = m.id
+            WHERE mu.user_id = $1
+              AND mu.is_deleted = 0
               AND ($2::VARCHAR IS NULL OR m.category = $2)
-              AND ($3::SMALLINT IS NULL OR um.is_read = $3)
-            ORDER BY um.is_pinned DESC, m.created_at DESC
+              AND ($3::SMALLINT IS NULL OR mu.is_read = $3)
+            ORDER BY mu.is_pinned DESC, m.created_at DESC
             LIMIT $4 OFFSET $5
             "#
         )
@@ -229,7 +229,7 @@ impl MessageRepository {
     pub async fn mark_as_read(&self, message_id: i64, user_id: i64) -> AppResult<()> {
         sqlx::query(
             r#"
-            UPDATE t_sys_user_messages
+            UPDATE t_sys_message_users
             SET is_read = 1, read_at = NOW()
             WHERE message_id = $1 AND user_id = $2
             "#
@@ -245,7 +245,7 @@ impl MessageRepository {
     pub async fn batch_mark_as_read(&self, message_ids: &[i64], user_id: i64) -> AppResult<()> {
         sqlx::query(
             r#"
-            UPDATE t_sys_user_messages
+            UPDATE t_sys_message_users
             SET is_read = 1, read_at = NOW()
             WHERE message_id = ANY($1) AND user_id = $2
             "#
@@ -263,13 +263,13 @@ impl MessageRepository {
             Some(cat) => {
                 sqlx::query(
                     r#"
-                    UPDATE t_sys_user_messages um
+                    UPDATE t_sys_message_users mu
                     SET is_read = 1, read_at = NOW()
                     FROM t_sys_messages m
-                    WHERE um.message_id = m.id
-                      AND um.user_id = $1
+                    WHERE mu.message_id = m.id
+                      AND mu.user_id = $1
                       AND m.category = $2
-                      AND um.is_deleted = 0
+                      AND mu.is_deleted = 0
                     "#
                 )
                 .bind(user_id)
@@ -280,7 +280,7 @@ impl MessageRepository {
             None => {
                 sqlx::query(
                     r#"
-                    UPDATE t_sys_user_messages
+                    UPDATE t_sys_message_users
                     SET is_read = 1, read_at = NOW()
                     WHERE user_id = $1 AND is_deleted = 0
                     "#
@@ -297,7 +297,7 @@ impl MessageRepository {
     pub async fn delete_message(&self, message_id: i64, user_id: i64) -> AppResult<()> {
         sqlx::query(
             r#"
-            UPDATE t_sys_user_messages
+            UPDATE t_sys_message_users
             SET is_deleted = 1, deleted_at = NOW()
             WHERE message_id = $1 AND user_id = $2
             "#
@@ -313,7 +313,7 @@ impl MessageRepository {
     pub async fn batch_delete(&self, message_ids: &[i64], user_id: i64) -> AppResult<()> {
         sqlx::query(
             r#"
-            UPDATE t_sys_user_messages
+            UPDATE t_sys_message_users
             SET is_deleted = 1, deleted_at = NOW()
             WHERE message_id = ANY($1) AND user_id = $2
             "#
@@ -329,7 +329,7 @@ impl MessageRepository {
     pub async fn pin_message(&self, message_id: i64, user_id: i64, pinned: bool) -> AppResult<()> {
         sqlx::query(
             r#"
-            UPDATE t_sys_user_messages
+            UPDATE t_sys_message_users
             SET is_pinned = $1
             WHERE message_id = $2 AND user_id = $3
             "#
@@ -399,12 +399,12 @@ impl MessageRepository {
         let result = sqlx::query(
             r#"
             SELECT COUNT(*) as count
-            FROM t_sys_user_messages um
-            JOIN t_sys_messages m ON um.message_id = m.id
-            WHERE um.user_id = $1
-              AND um.is_deleted = 0
+            FROM t_sys_message_users mu
+            JOIN t_sys_messages m ON mu.message_id = m.id
+            WHERE mu.user_id = $1
+              AND mu.is_deleted = 0
               AND ($2::VARCHAR IS NULL OR m.category = $2)
-              AND ($3::SMALLINT IS NULL OR um.is_read = $3)
+              AND ($3::SMALLINT IS NULL OR mu.is_read = $3)
             "#
         )
         .bind(user_id)

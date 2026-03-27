@@ -29,6 +29,7 @@ pub async fn send_message(
         state.redis.clone(),
         state.ws_manager.clone(),
         state.config.channel_config.clone(),
+        state.config.retry_config.clone(),
     );
 
     let message_id = service

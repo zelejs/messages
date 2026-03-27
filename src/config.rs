@@ -16,6 +16,7 @@ pub struct Config {
     pub smtp_password: String,
     pub dingtalk_webhook: String,
     pub channel_config: ChannelConfig,
+    pub retry_config: RetryConfig,
 }
 
 /// 渠道开关配置 - 从环境变量读取
@@ -35,6 +36,35 @@ impl Default for ChannelConfig {
             dingtalk_enabled: false,
             sms_enabled: false,
         }
+    }
+}
+
+/// 重试配置
+#[derive(Debug, Clone, Deserialize)]
+pub struct RetryConfig {
+    pub enabled: bool,
+    pub max_retries: i16,
+    /// 重试间隔，逗号分隔的秒数，如 "60,300,900"
+    pub retry_intervals: String,
+}
+
+impl Default for RetryConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            max_retries: 3,
+            retry_intervals: "60,300,900".to_string(), // 1分钟, 5分钟, 15分钟
+        }
+    }
+}
+
+impl RetryConfig {
+    /// 解析重试间隔为整数数组
+    pub fn intervals(&self) -> Vec<i32> {
+        self.retry_intervals
+            .split(',')
+            .filter_map(|s| s.trim().parse().ok())
+            .collect()
     }
 }
 
@@ -60,6 +90,7 @@ impl Config {
             smtp_password: env::var("SMTP_PASSWORD").unwrap_or_default(),
             dingtalk_webhook: env::var("DINGTALK_WEBHOOK").unwrap_or_default(),
             channel_config: ChannelConfig::from_env(),
+            retry_config: RetryConfig::from_env(),
         })
     }
 }
@@ -84,6 +115,24 @@ impl ChannelConfig {
                 .unwrap_or_else(|_| "false".to_string())
                 .parse()
                 .unwrap_or(false),
+        }
+    }
+}
+
+impl RetryConfig {
+    /// 从环境变量读取重试配置
+    pub fn from_env() -> Self {
+        Self {
+            enabled: env::var("RETRY_ENABLED")
+                .unwrap_or_else(|_| "true".to_string())
+                .parse()
+                .unwrap_or(true),
+            max_retries: env::var("RETRY_MAX_RETRIES")
+                .unwrap_or_else(|_| "3".to_string())
+                .parse()
+                .unwrap_or(3),
+            retry_intervals: env::var("RETRY_INTERVALS")
+                .unwrap_or_else(|_| "60,300,900".to_string()),
         }
     }
 }

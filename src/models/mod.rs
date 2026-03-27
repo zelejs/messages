@@ -4,4 +4,5 @@ pub mod tenant;
 pub mod organization;
 pub mod user;
 pub mod role;
+pub mod retry;
 

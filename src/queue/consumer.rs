@@ -112,7 +112,8 @@ pub async fn start_consumer(
 
     // Create service instance
     let channel_config = config.channel_config.clone();
-    let message_service = MessageService::new(db.clone(), redis.clone(), ws_manager.clone(), channel_config);
+    let retry_config = config.retry_config.clone();
+    let message_service = MessageService::new(db.clone(), redis.clone(), ws_manager.clone(), channel_config, retry_config);
 
     process_messages(channel, message_service).await?;
 

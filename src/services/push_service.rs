@@ -1,10 +1,10 @@
 use crate::{
     error::AppResult,
     models::message::Message,
-    repositories::{message_repository::MessageRepository, user_repository::UserRepository},
-    services::{channel::MessageChannel, channels::{WebSocketChannel, EmailChannel, DingTalkChannel}},
+    repositories::{message_repository::MessageRepository, retry_repository::RetryRepository, user_repository::UserRepository},
+    services::{channel::MessageChannel, channels::{WebSocketChannel, EmailChannel, DingTalkChannel}, retry_service::{RetryService, DLQService}},
     websocket::WebSocketManager,
-    config::ChannelConfig,
+    config::{ChannelConfig, RetryConfig},
 };
 use sqlx::PgPool;
 use std::sync::Arc;
@@ -14,6 +14,8 @@ use chrono::NaiveTime;
 pub struct PushService {
     message_repo: MessageRepository,
     user_repo: UserRepository,
+    retry_service: RetryService,
+    dlq_service: DLQService,
     ws_manager: Arc<RwLock<WebSocketManager>>,
     channels: Vec<Arc<dyn MessageChannel>>,
     channel_config: ChannelConfig,
@@ -26,10 +28,17 @@ impl PushService {
         ws_manager: Arc<RwLock<WebSocketManager>>,
         channels: Vec<Arc<dyn MessageChannel>>,
         channel_config: ChannelConfig,
+        retry_config: RetryConfig,
     ) -> Self {
+        let retry_repo = RetryRepository::new(db.clone());
+        let retry_service = RetryService::new(retry_repo.clone(), retry_config);
+        let dlq_service = DLQService::new(retry_repo);
+
         Self {
             message_repo: MessageRepository::new(db.clone()),
             user_repo: UserRepository::new(db),
+            retry_service,
+            dlq_service,
             ws_manager,
             channels,
             channel_config,
@@ -41,6 +50,7 @@ impl PushService {
         redis: redis::aio::ConnectionManager,
         ws_manager: Arc<RwLock<WebSocketManager>>,
         channel_config: ChannelConfig,
+        retry_config: RetryConfig,
     ) -> Self {
         let mut channels: Vec<Arc<dyn MessageChannel>> = Vec::new();
 
@@ -54,7 +64,7 @@ impl PushService {
             channels.push(Arc::new(DingTalkChannel::new()));
         }
 
-        Self::new(db, redis, ws_manager, channels, channel_config)
+        Self::new(db, redis, ws_manager, channels, channel_config, retry_config)
     }
 
     /// 检查用户是否处于免打扰时段
@@ -186,7 +196,7 @@ impl PushService {
                         tracing::info!("channel={} message={} user={} push success", channel.name(), message.id, user_id);
                     }
                     Err(err) => {
-                        // 推送失败
+                        // 推送失败 - 创建重试记录
                         let error_msg = format!("{:?}", err);
                         self.message_repo
                             .log_push(
@@ -198,6 +208,29 @@ impl PushService {
                             )
                             .await?;
                         tracing::warn!("channel={} message={} user={} push failed: {:?}", channel.name(), message.id, user_id, err);
+
+                        // 检查是否应该重试
+                        match self.retry_service.should_retry(message.id, user_id, channel.name()).await {
+                            Ok(true) => {
+                                // 创建重试记录
+                                if let Err(e) = self.retry_service.create_retry(
+                                    message.id,
+                                    user_id,
+                                    channel.name(),
+                                    &error_msg,
+                                ).await {
+                                    tracing::error!("Failed to create retry record: {:?}", e);
+                                } else {
+                                    tracing::info!("Created retry record for message={} user={} channel={}", message.id, user_id, channel.name());
+                                }
+                            }
+                            Ok(false) => {
+                                tracing::debug!("Retry not needed or already exists for message={} user={} channel={}", message.id, user_id, channel.name());
+                            }
+                            Err(e) => {
+                                tracing::error!("Failed to check retry status: {:?}", e);
+                            }
+                        }
                     }
                 }
             }
@@ -212,5 +245,84 @@ impl PushService {
             .await?;
 
         Ok(())
+    }
+
+    /// Process a single retry attempt
+    /// Returns true if retry was successful
+    pub async fn process_retry(
+        &self,
+        message: &Message,
+        user_id: i64,
+        channel_name: &str,
+    ) -> AppResult<bool> {
+        // Get user settings
+        let settings_vec = self.user_repo.get_message_settings(user_id).await?;
+        let settings_opt = settings_vec
+            .iter()
+            .find(|s| s.category.as_deref() == Some(&message.category))
+            .or_else(|| settings_vec.first());
+
+        let settings = if let Some(s) = settings_opt {
+            s.clone()
+        } else {
+            crate::models::user::UserMessageSetting {
+                id: 0,
+                user_id,
+                category: Some(message.category.clone()),
+                web_enabled: 1,
+                email_enabled: 0,
+                dingtalk_enabled: 0,
+                do_not_disturb: 0,
+                dnd_start_time: None,
+                dnd_end_time: None,
+                created_at: chrono::Utc::now(),
+                updated_at: chrono::Utc::now(),
+            }
+        };
+
+        // Find the channel
+        let channel = self.channels.iter()
+            .find(|c| c.name() == channel_name);
+
+        if let Some(channel) = channel {
+            // Attempt to send
+            match channel.send(message, user_id, &settings).await {
+                Ok(_) => {
+                    // Retry succeeded
+                    self.message_repo
+                        .log_push(message.id, user_id, channel_name, 1, None)
+                        .await?;
+                    tracing::info!(
+                        "Retry succeeded: message={} user={} channel={}",
+                        message.id, user_id, channel_name
+                    );
+                    Ok(true)
+                }
+                Err(err) => {
+                    let error_msg = format!("{:?}", err);
+                    self.message_repo
+                        .log_push(message.id, user_id, channel_name, 0, Some(&error_msg))
+                        .await?;
+                    tracing::warn!(
+                        "Retry failed: message={} user={} channel={} error={:?}",
+                        message.id, user_id, channel_name, err
+                    );
+                    Ok(false)
+                }
+            }
+        } else {
+            tracing::error!("Channel not found for retry: {}", channel_name);
+            Ok(false)
+        }
+    }
+
+    /// Get reference to retry service
+    pub fn retry_service(&self) -> &RetryService {
+        &self.retry_service
+    }
+
+    /// Get reference to DLQ service
+    pub fn dlq_service(&self) -> &DLQService {
+        &self.dlq_service
     }
 }

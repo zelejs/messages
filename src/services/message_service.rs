@@ -1,6 +1,6 @@
 use crate::{
     channel::{ChannelManager, LogFileChannel, MessageChannel},
-    config::ChannelConfig,
+    config::{ChannelConfig, RetryConfig},
     error::{AppError, AppResult},
     models::message::{CreateMessageRequest, DispatchTarget, Message, MessageType},
     repositories::message_repository::MessageRepository,
@@ -21,6 +21,7 @@ pub struct MessageService {
     target_resolver: TargetResolver,
     ws_manager: Arc<RwLock<WebSocketManager>>,
     channel_config: ChannelConfig,
+    retry_config: RetryConfig,
 }
 
 impl MessageService {
@@ -29,6 +30,7 @@ impl MessageService {
         redis: redis::aio::ConnectionManager,
         ws_manager: Arc<RwLock<WebSocketManager>>,
         channel_config: ChannelConfig,
+        retry_config: RetryConfig,
     ) -> Self {
         Self {
             db: db.clone(),
@@ -38,6 +40,7 @@ impl MessageService {
             target_resolver: TargetResolver::new(db, redis),
             ws_manager,
             channel_config,
+            retry_config,
         }
     }
 
@@ -215,6 +218,7 @@ impl MessageService {
             self.redis.clone(),
             self.ws_manager.clone(),
             self.channel_config.clone(),
+            self.retry_config.clone(),
         );
         push_service.push_to_users(&message, user_ids.clone()).await?;
 
