@@ -380,7 +380,7 @@ GET {{baseUrl}}/message/unread-stats
 ### MSG_TC_005_01 - Get user message settings
 # Description: Retrieve notification preferences for current user
 # Constraints: Returns settings for all channels and categories
-GET {{baseUrl}}/message/settings
+GET {{baseUrl}}/cfg/message/settings
 # Authorization: Bearer <PASTE_YOUR_JWT_TOKEN>
 
 ###
@@ -388,7 +388,7 @@ GET {{baseUrl}}/message/settings
 ### MSG_TC_005_02 - Update message settings (partial)
 # Description: Update specific notification preferences
 # Constraints: Partial update allowed, only specified fields updated
-PUT {{baseUrl}}/message/settings
+PUT {{baseUrl}}/cfg/message/settings
 Content-Type: {{contentType}}
 # Authorization: Bearer <PASTE_YOUR_JWT_TOKEN>
 
@@ -404,7 +404,7 @@ Content-Type: {{contentType}}
 ### MSG_TC_005_03 - Enable Do Not Disturb mode
 # Description: Enable DND mode with time range
 # Constraints: Time format HH:MM:SS, start_time < end_time
-PUT {{baseUrl}}/message/settings/dnd
+PUT {{baseUrl}}/cfg/message/settings/dnd
 Content-Type: {{contentType}}
 # Authorization: Bearer <PASTE_YOUR_JWT_TOKEN>
 
@@ -419,7 +419,7 @@ Content-Type: {{contentType}}
 ### MSG_TC_005_04 - Disable Do Not Disturb mode
 # Description: Disable DND mode
 # Constraints: No time parameters required when disabling
-PUT {{baseUrl}}/message/settings/dnd
+PUT {{baseUrl}}/cfg/message/settings/dnd
 Content-Type: {{contentType}}
 # Authorization: Bearer <PASTE_YOUR_JWT_TOKEN>
 
@@ -432,7 +432,7 @@ Content-Type: {{contentType}}
 ### MSG_TC_005_05 - Update channel preferences
 # Description: Update which channels are enabled for notifications
 # Constraints: Updates only channel settings, preserves other preferences
-PUT {{baseUrl}}/message/settings/channels
+PUT {{baseUrl}}/cfg/message/settings/channels
 Content-Type: {{contentType}}
 # Authorization: Bearer <PASTE_YOUR_JWT_TOKEN>
 
@@ -598,7 +598,7 @@ Content-Type: {{contentType}}
 
 ### MSG_TC_ERR_09 - Update DND with invalid time format (400)
 # Expected: 400 Bad Request - time must be HH:MM:SS format
-PUT {{baseUrl}}/message/settings/dnd
+PUT {{baseUrl}}/cfg/message/settings/dnd
 Content-Type: {{contentType}}
 
 {

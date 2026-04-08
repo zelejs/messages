@@ -241,11 +241,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/message/unread-count", get(get_unread_count))
         .route("/api/message/unread-stats", get(get_unread_stats))
 
-        // User settings routes (business prefix: /api/message/)
-        .route("/api/message/settings", get(get_settings))
-        .route("/api/message/settings", put(update_settings))
-        .route("/api/message/settings/dnd", put(update_dnd))
-        .route("/api/message/settings/channels", put(update_channels))
+        // User settings routes (config prefix: /api/cfg/message/)
+        .route("/api/cfg/message/settings", get(get_settings))
+        .route("/api/cfg/message/settings", put(update_settings))
+        .route("/api/cfg/message/settings/dnd", put(update_dnd))
+        .route("/api/cfg/message/settings/channels", put(update_channels))
 
         // Admin routes (admin prefix: /api/adm/message/)
         .route("/api/adm/message/list", get(list_all_messages))
